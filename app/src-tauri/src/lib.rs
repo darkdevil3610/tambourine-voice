@@ -5,9 +5,14 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
+mod audio;
 mod commands;
+mod history;
+mod settings;
 mod state;
 
+use history::HistoryStorage;
+use settings::SettingsManager;
 use state::AppState;
 
 #[cfg(desktop)]
@@ -28,8 +33,29 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::text::type_text,
             commands::text::get_server_url,
+            commands::settings::get_settings,
+            commands::settings::save_settings,
+            commands::settings::update_toggle_hotkey,
+            commands::settings::update_hold_hotkey,
+            commands::settings::update_selected_mic,
+            commands::settings::update_sound_enabled,
+            commands::history::add_history_entry,
+            commands::history::get_history,
+            commands::history::delete_history_entry,
+            commands::history::clear_history,
         ])
         .setup(|app| {
+            // Initialize settings manager and history storage
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("Failed to get app data directory");
+
+            let settings_manager = SettingsManager::new(app_data_dir.clone());
+            app.manage(settings_manager);
+
+            let history_storage = HistoryStorage::new(app_data_dir);
+            app.manage(history_storage);
             // Create overlay window
             let overlay = tauri::WebviewWindowBuilder::new(
                 app,
@@ -125,6 +151,13 @@ fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .unwrap()
         .with_handler(move |app, shortcut, event| {
             let state = app.state::<AppState>();
+            let settings_manager = app.state::<SettingsManager>();
+
+            // Check if sound is enabled
+            let sound_enabled = settings_manager
+                .get()
+                .map(|s| s.sound_enabled)
+                .unwrap_or(true);
 
             let toggle_shortcut =
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
@@ -140,11 +173,17 @@ fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                         // Stop recording
                         state.is_recording.store(false, Ordering::SeqCst);
                         log::info!("Toggle: stopping recording");
+                        if sound_enabled {
+                            audio::play_sound(audio::SoundType::RecordingStop);
+                        }
                         let _ = app.emit("recording-stop", ());
                     } else {
                         // Start recording
                         state.is_recording.store(true, Ordering::SeqCst);
                         log::info!("Toggle: starting recording");
+                        if sound_enabled {
+                            audio::play_sound(audio::SoundType::RecordingStart);
+                        }
                         show_overlay(app);
                         let _ = app.emit("recording-start", ());
                     }
@@ -158,6 +197,9 @@ fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                             // First press - start recording
                             state.is_recording.store(true, Ordering::SeqCst);
                             log::info!("Hold: starting recording");
+                            if sound_enabled {
+                                audio::play_sound(audio::SoundType::RecordingStart);
+                            }
                             show_overlay(app);
                             let _ = app.emit("recording-start", ());
                         }
@@ -167,6 +209,9 @@ fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                             // Key released - stop recording
                             state.is_recording.store(false, Ordering::SeqCst);
                             log::info!("Hold: stopping recording");
+                            if sound_enabled {
+                                audio::play_sound(audio::SoundType::RecordingStop);
+                            }
                             let _ = app.emit("recording-stop", ());
                         }
                     }

@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { type AppSettings, type HotkeyConfig, tauriAPI } from "./tauri";
 
 export function useServerUrl() {
 	return useQuery({
@@ -12,5 +13,102 @@ export function useServerUrl() {
 export function useTypeText() {
 	return useMutation({
 		mutationFn: (text: string) => invoke("type_text", { text }),
+	});
+}
+
+// Settings queries and mutations
+export function useSettings() {
+	return useQuery({
+		queryKey: ["settings"],
+		queryFn: () => tauriAPI.getSettings(),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+}
+
+export function useSaveSettings() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (settings: AppSettings) => tauriAPI.saveSettings(settings),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateToggleHotkey() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (hotkey: HotkeyConfig) => tauriAPI.updateToggleHotkey(hotkey),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateHoldHotkey() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (hotkey: HotkeyConfig) => tauriAPI.updateHoldHotkey(hotkey),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateSelectedMic() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (micId: string | null) => tauriAPI.updateSelectedMic(micId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateSoundEnabled() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (enabled: boolean) => tauriAPI.updateSoundEnabled(enabled),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+// History queries and mutations
+export function useHistory(limit?: number) {
+	return useQuery({
+		queryKey: ["history", limit],
+		queryFn: () => tauriAPI.getHistory(limit),
+	});
+}
+
+export function useAddHistoryEntry() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (text: string) => tauriAPI.addHistoryEntry(text),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["history"] });
+		},
+	});
+}
+
+export function useDeleteHistoryEntry() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (id: string) => tauriAPI.deleteHistoryEntry(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["history"] });
+		},
+	});
+}
+
+export function useClearHistory() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => tauriAPI.clearHistory(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["history"] });
+		},
 	});
 }

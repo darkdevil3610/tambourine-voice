@@ -1,3 +1,4 @@
+import { useTimeout } from "@mantine/hooks";
 import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 import {
 	PipecatClientProvider,
@@ -6,7 +7,12 @@ import {
 import { ThemeProvider, UserAudioComponent } from "@pipecat-ai/voice-ui-kit";
 import { WebSocketTransport } from "@pipecat-ai/websocket-transport";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useServerUrl, useTypeText } from "./lib/queries";
+import {
+	useAddHistoryEntry,
+	useServerUrl,
+	useSettings,
+	useTypeText,
+} from "./lib/queries";
 import { tauriAPI } from "./lib/tauri";
 import { useRecordingStore } from "./stores/recordingStore";
 import "./app.css";
@@ -28,7 +34,6 @@ function RecordingControl() {
 	const client = usePipecatClient();
 	const { isRecording, setRecording, setWaitingForResponse } =
 		useRecordingStore();
-	const responseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const clientRef = useRef(client);
 
 	// Keep client ref in sync (still needed since client comes from provider)
@@ -39,6 +44,20 @@ function RecordingControl() {
 	// TanStack Query hooks
 	const { data: serverUrl } = useServerUrl();
 	const typeTextMutation = useTypeText();
+	const addHistoryEntry = useAddHistoryEntry();
+
+	// Timeout to disconnect if no response in 10 seconds
+	const { start: startResponseTimeout, clear: clearResponseTimeout } =
+		useTimeout(() => {
+			const currentState = useRecordingStore.getState();
+			if (currentState.isWaitingForResponse) {
+				console.log("Response timeout - disconnecting");
+				setWaitingForResponse(false);
+				clientRef.current?.disconnect().catch((error: unknown) => {
+					console.error("Failed to disconnect on timeout:", error);
+				});
+			}
+		}, 10000);
 
 	const startRecording = useCallback(async () => {
 		const currentClient = clientRef.current;
@@ -69,23 +88,9 @@ function RecordingControl() {
 			console.error("Failed to send stop-recording message:", error);
 		}
 
-		// Clear any existing timeout
-		if (responseTimeoutRef.current) {
-			clearTimeout(responseTimeoutRef.current);
-		}
-
-		// Set a timeout to disconnect if no response in 10 seconds
-		responseTimeoutRef.current = setTimeout(() => {
-			const currentState = useRecordingStore.getState();
-			if (currentState.isWaitingForResponse) {
-				console.log("Response timeout - disconnecting");
-				setWaitingForResponse(false);
-				currentClient.disconnect().catch((error: unknown) => {
-					console.error("Failed to disconnect on timeout:", error);
-				});
-			}
-		}, 10000);
-	}, [setRecording, setWaitingForResponse]);
+		// Start timeout to disconnect if no response in 10 seconds
+		startResponseTimeout();
+	}, [setRecording, setWaitingForResponse, startResponseTimeout]);
 
 	// Hotkey events from Rust backend - register ONCE
 	useEffect(() => {
@@ -125,12 +130,13 @@ function RecordingControl() {
 
 		const handleResponseReceived = async (text: string) => {
 			// Clear the timeout since we got a response
-			if (responseTimeoutRef.current) {
-				clearTimeout(responseTimeoutRef.current);
-				responseTimeoutRef.current = null;
-			}
+			clearResponseTimeout();
 
 			await typeTextMutation.mutateAsync(text);
+
+			// Save to history
+			addHistoryEntry.mutate(text);
+
 			tauriAPI.setOverlayState("idle");
 
 			// Disconnect after receiving response
@@ -164,7 +170,13 @@ function RecordingControl() {
 			client.off(RTVIEvent.BotTranscript, handleBotTranscript);
 			client.off(RTVIEvent.ServerMessage, handleServerMessage);
 		};
-	}, [client, setWaitingForResponse, typeTextMutation]);
+	}, [
+		client,
+		setWaitingForResponse,
+		typeTextMutation,
+		addHistoryEntry,
+		clearResponseTimeout,
+	]);
 
 	return (
 		<UserAudioComponent
@@ -186,6 +198,7 @@ function RecordingControl() {
 export default function OverlayApp() {
 	const [client, setClient] = useState<PipecatClient | null>(null);
 	const [devicesReady, setDevicesReady] = useState(false);
+	const { data: settings } = useSettings();
 
 	useEffect(() => {
 		const transport = new WebSocketTransport();
@@ -213,6 +226,14 @@ export default function OverlayApp() {
 			pipecatClient.disconnect();
 		};
 	}, []);
+
+	// Apply selected microphone when settings or client changes
+	useEffect(() => {
+		if (client && devicesReady && settings?.selected_mic_id) {
+			console.log("Applying selected mic:", settings.selected_mic_id);
+			client.updateMic(settings.selected_mic_id);
+		}
+	}, [client, devicesReady, settings?.selected_mic_id]);
 
 	if (!client || !devicesReady) return null;
 

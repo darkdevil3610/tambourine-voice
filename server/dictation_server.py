@@ -71,7 +71,7 @@ async def run_server(host: str, port: int, settings: Settings) -> None:
     logger.info(f"Starting WebSocket server on ws://{host}:{port}")
 
     # Create WebSocket transport with protobuf serializer for pipecat-ai/client-js compatibility
-    # No VAD - buffer flushes when client sends stop-recording message (like Wispr Flow)
+    # No VAD - buffer flushes when client sends stop-recording message
     transport = WebsocketServerTransport(
         host=host,
         port=port,
