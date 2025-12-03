@@ -37,15 +37,14 @@ function isTranscriptMessage(
 	);
 }
 
-type ConnectionState = "idle" | "connecting" | "connected" | "disconnecting";
-
 function RecordingControl() {
 	const client = usePipecatClient();
 	const { isRecording, setRecording, setWaitingForResponse } =
 		useRecordingStore();
 	const clientRef = useRef(client);
 	const containerRef = useRef<HTMLDivElement>(null);
-	const connectionStateRef = useRef<ConnectionState>("idle");
+	const isConnectedRef = useRef(false);
+	const isConnectingRef = useRef(false);
 
 	// ResizeObserver to auto-resize window to fit content
 	useEffect(() => {
@@ -73,76 +72,57 @@ function RecordingControl() {
 	const typeTextMutation = useTypeText();
 	const addHistoryEntry = useAddHistoryEntry();
 
-	// Helper to disconnect client gracefully
-	const disconnectClient = useCallback(async () => {
+	// Connect to server on startup when serverUrl is available
+	useEffect(() => {
 		const currentClient = clientRef.current;
-		if (!currentClient || connectionStateRef.current === "idle") return;
+		if (!currentClient || !serverUrl) return;
+		if (isConnectedRef.current || isConnectingRef.current) return;
 
-		connectionStateRef.current = "disconnecting";
-		try {
-			await currentClient.disconnect();
-		} catch (error) {
-			// Ignore "Session ended" errors - client wasn't fully connected
-			const errorStr = String(error);
-			if (
-				!errorStr.includes("Session ended") &&
-				!errorStr.includes("not started")
-			) {
-				console.error("Disconnect error:", error);
+		const connectToServer = async () => {
+			console.log("Connecting to server on startup:", serverUrl);
+			isConnectingRef.current = true;
+			try {
+				await currentClient.connect({ wsUrl: serverUrl });
+				// handleConnected will set isConnectedRef and mute mic
+				console.log("Initial connection established");
+			} catch (error) {
+				console.error("Failed to connect on startup:", error);
+				isConnectingRef.current = false;
 			}
-		} finally {
-			connectionStateRef.current = "idle";
-		}
-	}, []);
+		};
 
-	// Timeout to disconnect if no response in 10 seconds
+		connectToServer();
+	}, [serverUrl]);
+
+	// Timeout to reset state if no response in 10 seconds
 	const { start: startResponseTimeout, clear: clearResponseTimeout } =
 		useTimeout(() => {
 			const currentState = useRecordingStore.getState();
 			if (currentState.isWaitingForResponse) {
-				console.log("Response timeout - disconnecting");
+				console.log("Response timeout - resetting state");
 				setWaitingForResponse(false);
-				disconnectClient();
 			}
 		}, 10000);
 
-	const startRecording = useCallback(async () => {
-		console.log("startRecording called", {
-			serverUrl,
-			connectionState: connectionStateRef.current,
-		});
+	const startRecording = useCallback(() => {
 		const currentClient = clientRef.current;
 
-		// Check connection state first - only allow starting from idle
-		if (connectionStateRef.current !== "idle") {
-			console.log(
-				"startRecording aborted - connection busy:",
-				connectionStateRef.current,
-			);
+		if (!isConnectedRef.current || !currentClient) {
+			console.log("Cannot start recording - not connected");
 			return;
 		}
 
-		if (!currentClient || !serverUrl) {
-			console.log("startRecording aborted", {
-				hasClient: !!currentClient,
-				hasServerUrl: !!serverUrl,
-			});
-			return;
-		}
-
-		connectionStateRef.current = "connecting";
 		setRecording(true);
+		// Signal server to reset buffer for new recording session
 		try {
-			console.log("Connecting to server:", serverUrl);
-			await currentClient.connect({ wsUrl: serverUrl });
-			// Note: connectionStateRef will be set to 'connected' by RTVIEvent.Connected handler
-			console.log("Connected successfully");
+			currentClient.sendClientMessage("start-recording", {});
 		} catch (error) {
-			console.error("Failed to connect:", error);
-			connectionStateRef.current = "idle";
-			setRecording(false);
+			console.error("Failed to send start-recording message:", error);
 		}
-	}, [serverUrl, setRecording]);
+		// Unmute mic to start streaming audio
+		currentClient.enableMic(true);
+		console.log("Recording started, mic enabled");
+	}, [setRecording]);
 
 	const stopRecording = useCallback(() => {
 		const currentClient = clientRef.current;
@@ -152,15 +132,19 @@ function RecordingControl() {
 		setRecording(false);
 		setWaitingForResponse(true);
 
-		// Tell server to flush the transcription buffer
+		// Mute mic to stop streaming audio
+		currentClient.enableMic(false);
+
+		// Tell server to flush the transcription buffer and process
 		try {
 			currentClient.sendClientMessage("stop-recording", {});
 		} catch (error) {
 			console.error("Failed to send stop-recording message:", error);
 		}
 
-		// Start timeout to disconnect if no response in 10 seconds
+		// Start timeout to reset state if no response in 10 seconds
 		startResponseTimeout();
+		console.log("Recording stopped, mic disabled, waiting for response");
 	}, [setRecording, setWaitingForResponse, startResponseTimeout]);
 
 	// Effect events for stable handlers - always have access to latest values
@@ -203,18 +187,43 @@ function RecordingControl() {
 		}
 	}, [isRecording, startRecording, stopRecording]);
 
-	// Track connection state via RTVI events
+	// Track connection state via RTVI events and handle reconnection
 	useEffect(() => {
 		if (!client) return;
 
 		const handleConnected = () => {
-			console.log("RTVIEvent.Connected - audio session started");
-			connectionStateRef.current = "connected";
+			console.log("RTVIEvent.Connected - WebSocket session established");
+			isConnectedRef.current = true;
+			isConnectingRef.current = false;
 		};
 
 		const handleDisconnected = () => {
-			console.log("RTVIEvent.Disconnected");
-			connectionStateRef.current = "idle";
+			console.log("RTVIEvent.Disconnected - connection lost");
+			isConnectedRef.current = false;
+			isConnectingRef.current = false;
+
+			// Reset any active recording state
+			const state = useRecordingStore.getState();
+			if (state.isRecording) {
+				setRecording(false);
+			}
+			if (state.isWaitingForResponse) {
+				setWaitingForResponse(false);
+			}
+
+			// Attempt reconnection after delay
+			setTimeout(async () => {
+				if (serverUrl && !isConnectedRef.current && !isConnectingRef.current) {
+					console.log("Attempting reconnection...");
+					isConnectingRef.current = true;
+					try {
+						await client.connect({ wsUrl: serverUrl });
+					} catch (error) {
+						console.error("Reconnection failed:", error);
+						isConnectingRef.current = false;
+					}
+				}
+			}, 2000);
 		};
 
 		client.on(RTVIEvent.Connected, handleConnected);
@@ -224,9 +233,9 @@ function RecordingControl() {
 			client.off(RTVIEvent.Connected, handleConnected);
 			client.off(RTVIEvent.Disconnected, handleDisconnected);
 		};
-	}, [client]);
+	}, [client, serverUrl, setRecording, setWaitingForResponse]);
 
-	// Handle transcript and type text, then disconnect
+	// Handle transcript and type text
 	useEffect(() => {
 		if (!client) return;
 
@@ -239,9 +248,9 @@ function RecordingControl() {
 			// Save to history
 			addHistoryEntry.mutate(text);
 
-			// Disconnect after receiving response
+			// Reset waiting state - stay connected for next recording
 			setWaitingForResponse(false);
-			await disconnectClient();
+			console.log("Response received and processed, ready for next recording");
 		};
 
 		const handleBotTranscript = async (data: { text?: string }) => {
@@ -269,7 +278,6 @@ function RecordingControl() {
 		typeTextMutation,
 		addHistoryEntry,
 		clearResponseTimeout,
-		disconnectClient,
 	]);
 
 	return (
@@ -312,7 +320,7 @@ export default function OverlayApp() {
 		const transport = new WebSocketTransport();
 		const pipecatClient = new PipecatClient({
 			transport,
-			enableMic: true,
+			enableMic: false, // Start muted, enable when recording
 			enableCam: false,
 		});
 		setClient(pipecatClient);

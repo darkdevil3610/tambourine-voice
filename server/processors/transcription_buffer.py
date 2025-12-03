@@ -51,23 +51,34 @@ class TranscriptionBufferProcessor(FrameProcessor):
             # Don't push TranscriptionFrame - we'll emit consolidated version later
             return
 
-        if isinstance(frame, RTVIClientMessageFrame) and frame.type == "stop-recording":
-            # Client explicitly stopped recording - flush the buffer
-            if self._buffer.strip():
-                logger.info(f"Stop-recording received, flushing buffer: '{self._buffer.strip()}'")
-                timestamp = datetime.now(UTC).isoformat()
-                consolidated_frame = TranscriptionFrame(
-                    text=self._buffer.strip(),
-                    user_id=self._last_user_id,
-                    timestamp=timestamp,
-                    language=self._last_language,
-                )
-                await self.push_frame(consolidated_frame, direction)
+        if isinstance(frame, RTVIClientMessageFrame):
+            if frame.type == "start-recording":
+                # New recording session - reset buffer
+                logger.info("Start-recording received, resetting buffer")
                 self._buffer = ""
-            else:
-                logger.info("Stop-recording received but buffer is empty")
-            # Don't pass through the client message frame
-            return
+                self._last_user_id = "user"
+                self._last_language = None
+                return
+
+            if frame.type == "stop-recording":
+                # Client explicitly stopped recording - flush the buffer
+                if self._buffer.strip():
+                    logger.info(
+                        f"Stop-recording received, flushing buffer: '{self._buffer.strip()}'"
+                    )
+                    timestamp = datetime.now(UTC).isoformat()
+                    consolidated_frame = TranscriptionFrame(
+                        text=self._buffer.strip(),
+                        user_id=self._last_user_id,
+                        timestamp=timestamp,
+                        language=self._last_language,
+                    )
+                    await self.push_frame(consolidated_frame, direction)
+                    self._buffer = ""
+                else:
+                    logger.info("Stop-recording received but buffer is empty")
+                # Don't pass through the client message frame
+                return
 
         # Pass through all other frames unchanged
         await self.push_frame(frame, direction)

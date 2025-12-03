@@ -2,4 +2,4 @@
 
 from processors.llm_cleanup import LLMResponseToRTVIConverter, TranscriptionToLLMConverter
 
-__all__ = ["TranscriptionToLLMConverter", "LLMResponseToRTVIConverter"]
+__all__ = ["LLMResponseToRTVIConverter", "TranscriptionToLLMConverter"]
