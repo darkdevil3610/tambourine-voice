@@ -384,14 +384,22 @@ pub fn run() {
                         panel.set_floating_panel(true);
 
                         // Set collection behavior to appear on all spaces including fullscreen
+                        // - can_join_all_spaces: appears on all Spaces (virtual desktops)
+                        // - full_screen_auxiliary: works alongside fullscreen apps
+                        // - ignores_cycle: excluded from Cmd+Tab app cycling
                         let behavior = CollectionBehavior::new()
                             .can_join_all_spaces()
-                            .full_screen_auxiliary();
+                            .full_screen_auxiliary()
+                            .ignores_cycle();
                         panel.set_collection_behavior(behavior.value());
 
                         // Set style mask to non-activating panel
                         let style = tauri_nspanel::StyleMask::empty().nonactivating_panel();
                         panel.set_style_mask(style.value());
+
+                        // Force the panel to re-register with the window server after setting behaviors
+                        // This ensures the collection behavior takes effect immediately
+                        panel.order_front_regardless();
 
                         log::info!("[NSPanel] Successfully converted overlay to NSPanel");
                     }
