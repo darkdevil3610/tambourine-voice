@@ -123,6 +123,17 @@ Client and server should evolve independently:
 
 Be respectful and constructive in all interactions. We're building this together and value contributions of all kinds—code, documentation, bug reports, and feature suggestions.
 
+## Adding New Providers
+
+STT and LLM providers are defined in `server/services/provider_registry.py`:
+
+1. Add enum value to `STTProviderId` or `LLMProviderId` in `protocol/providers.py`
+2. Import the pipecat service class in `provider_registry.py`
+3. Add a provider config entry to `STT_PROVIDERS` or `LLM_PROVIDERS`
+4. Add the environment variable to `.env.example`
+
+See existing providers for credential mapper patterns.
+
 ## Questions?
 
 Open an issue or join the discussion on the project's GitHub page.

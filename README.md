@@ -242,6 +242,28 @@ pnpm dev           # Start Tauri app in dev mode
 pnpm build         # Build for current platform
 ```
 
+## API Reference
+
+The server exposes HTTP endpoints on port 8765 (default):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check for container orchestration |
+| `/api/client/register` | POST | Generate and register a new client UUID |
+| `/api/client/verify/{uuid}` | GET | Verify if a client UUID is registered |
+| `/api/offer` | POST | WebRTC SDP offer/answer handshake |
+| `/api/offer` | PATCH | ICE candidate trickle |
+| `/api/providers` | GET | List available STT and LLM providers |
+| `/api/prompt/sections/default` | GET | Get default prompt templates |
+| `/api/config/prompts` | PUT | Update prompt sections (requires `X-Client-UUID` header) |
+| `/api/config/stt-timeout` | PUT | Update STT timeout (requires `X-Client-UUID` header) |
+
+All endpoints are rate-limited. See `server/utils/rate_limiter.py` for limits.
+
+### Rate Limiting
+
+All endpoints include IP-based rate limiting to prevent abuse. Limits are configured in `server/utils/rate_limiter.py`.
+
 ## Configuration
 
 ### Server Configuration (.env)
