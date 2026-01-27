@@ -73,6 +73,18 @@ class Settings(BaseSettings):
     host: str = Field("127.0.0.1", description="Host to bind the server to")
     port: int = Field(8765, description="Port to listen on")
 
+    # TURN Server Configuration (Optional)
+    # When configured, the server generates time-limited HMAC credentials for NAT traversal
+    turn_server_url: str | None = Field(
+        None, description="TURN server URL (e.g., turn:your-turn-server:3478)"
+    )
+    turn_shared_secret: str | None = Field(
+        None, description="TURN shared secret for HMAC credential generation"
+    )
+    turn_credential_ttl: int = Field(
+        3600, description="TURN credential TTL in seconds (default: 1 hour)"
+    )
+
     @model_validator(mode="after")
     def validate_at_least_one_provider(self) -> Self:
         """Validate that at least one STT and one LLM provider is configured.

@@ -765,6 +765,18 @@ export interface AvailableProvidersData {
 	llm: ProviderInfo[];
 }
 
+/** ICE server configuration matching WebRTC RTCIceServer interface */
+export interface IceServerConfig {
+	urls: string;
+	username?: string;
+	credential?: string;
+}
+
+/** Response from GET /api/ice-servers */
+export interface IceServersResponse {
+	ice_servers: IceServerConfig[];
+}
+
 // Create ky instance with sensible defaults for API calls
 function createApiClient(serverUrl: string) {
 	return ky.create({
@@ -817,5 +829,14 @@ export const configAPI = {
 	): Promise<AvailableProvidersData> => {
 		const api = createApiClient(serverUrl);
 		return api.get("api/providers").json<AvailableProvidersData>();
+	},
+
+	// Get ICE servers with fresh TURN credentials
+	getIceServers: async (serverUrl: string): Promise<IceServerConfig[]> => {
+		const api = createApiClient(serverUrl);
+		const response = await api
+			.get("api/ice-servers")
+			.json<IceServersResponse>();
+		return response.ice_servers;
 	},
 };
