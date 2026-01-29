@@ -11,24 +11,12 @@ import { PromptSectionEditor } from "./PromptSectionEditor";
 import type { MutationStatus } from "./StatusIndicator";
 
 const DEFAULT_SECTIONS: CleanupPromptSections = {
-	main: { enabled: true, mode: "auto" },
-	advanced: { enabled: true, mode: "auto" },
-	dictionary: { enabled: false, mode: "manual", content: "" },
+	main: { enabled: true, mode: { mode: "auto" } },
+	advanced: { enabled: true, mode: { mode: "auto" } },
+	dictionary: { enabled: false, mode: { mode: "auto" } },
 };
 
 type SectionKey = "main" | "advanced" | "dictionary";
-
-interface LocalSectionState {
-	enabled: boolean;
-	content: string;
-	auto: boolean;
-}
-
-interface LocalSections {
-	main: LocalSectionState;
-	advanced: LocalSectionState;
-	dictionary: LocalSectionState;
-}
 
 export function PromptSettings() {
 	const { data: settings } = useSettings();
@@ -36,12 +24,9 @@ export function PromptSettings() {
 		useDefaultSections();
 	const updateCleanupPromptSections = useUpdateCleanupPromptSections();
 
-	// Consolidated local state for all sections
-	const [localSections, setLocalSections] = useState<LocalSections>({
-		main: { enabled: true, content: "", auto: true },
-		advanced: { enabled: true, content: "", auto: true },
-		dictionary: { enabled: false, content: "", auto: false },
-	});
+	// Consolidated local state for all sections using discriminated union
+	const [localSections, setLocalSections] =
+		useState<CleanupPromptSections>(DEFAULT_SECTIONS);
 
 	// Track which section is currently saving to show per-section status
 	const [savingSectionKey, setSavingSectionKey] = useState<SectionKey | null>(
@@ -54,14 +39,13 @@ export function PromptSettings() {
 		return updateCleanupPromptSections.status;
 	};
 
-	// Track if each section has custom content (manual mode with non-empty content)
 	const getSectionContent = (
 		section: PromptSection | undefined,
 	): string | null => {
 		if (!section) return null;
-		return match(section)
+		return match(section.mode)
 			.with({ mode: "auto" }, () => null)
-			.with({ mode: "manual" }, (s) => s.content)
+			.with({ mode: "manual" }, (m) => m.content)
 			.exhaustive();
 	};
 
@@ -83,87 +67,29 @@ export function PromptSettings() {
 
 	// Sync local state with settings when loaded
 	useEffect(() => {
-		if (settings !== undefined && defaultSections !== undefined) {
+		if (settings !== undefined) {
 			const sections = settings.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
-
-			// Helper to extract content from discriminated union
-			const extractContent = (
-				section: PromptSection,
-				defaultContent: string,
-			): string =>
-				match(section)
-					.with({ mode: "auto" }, () => defaultContent)
-					.with({ mode: "manual" }, (s) => s.content || defaultContent)
-					.exhaustive();
-
-			setLocalSections({
-				main: {
-					enabled: sections.main.enabled,
-					content: extractContent(sections.main, defaultSections.main),
-					auto: sections.main.mode === "auto",
-				},
-				advanced: {
-					enabled: sections.advanced.enabled,
-					content: extractContent(sections.advanced, defaultSections.advanced),
-					auto: sections.advanced.mode === "auto",
-				},
-				dictionary: {
-					enabled: sections.dictionary.enabled,
-					content: extractContent(
-						sections.dictionary,
-						defaultSections.dictionary,
-					),
-					auto: false, // Dictionary never has auto mode
-				},
-			});
+			setLocalSections(sections);
 		}
-	}, [settings, defaultSections]);
+	}, [settings]);
 
 	// Helper to build CleanupPromptSections from local state with optional overrides
 	const buildSections = useCallback(
 		(overrides?: {
 			key: SectionKey;
-			enabled?: boolean;
-			content?: string | null;
-			auto?: boolean;
+			section: PromptSection;
 		}): CleanupPromptSections => {
-			const getEnabled = (key: SectionKey): boolean => {
-				return overrides?.key === key && overrides.enabled !== undefined
-					? overrides.enabled
-					: localSections[key].enabled;
-			};
-
-			const getAuto = (key: SectionKey): boolean => {
-				return overrides?.key === key && overrides.auto !== undefined
-					? overrides.auto
-					: localSections[key].auto;
-			};
-
-			const getContent = (key: SectionKey): string => {
-				const content =
-					overrides?.key === key && overrides.content !== undefined
-						? overrides.content
-						: localSections[key].content;
-				return content || "";
-			};
-
-			// Build discriminated union based on mode
-			const buildSection = (
-				key: SectionKey,
-			): CleanupPromptSections[SectionKey] => {
-				const enabled = getEnabled(key);
-				const isAuto = getAuto(key);
-
-				if (isAuto) {
-					return { enabled, mode: "auto" };
-				}
-				return { enabled, mode: "manual", content: getContent(key) };
-			};
-
 			return {
-				main: buildSection("main"),
-				advanced: buildSection("advanced"),
-				dictionary: buildSection("dictionary"), // Dictionary is always manual
+				main:
+					overrides?.key === "main" ? overrides.section : localSections.main,
+				advanced:
+					overrides?.key === "advanced"
+						? overrides.section
+						: localSections.advanced,
+				dictionary:
+					overrides?.key === "dictionary"
+						? overrides.section
+						: localSections.dictionary,
 			};
 		},
 		[localSections],
@@ -178,53 +104,78 @@ export function PromptSettings() {
 		[updateCleanupPromptSections],
 	);
 
-	// Generic toggle handler
 	const handleToggle = useCallback(
 		(key: SectionKey, checked: boolean) => {
+			const currentSection = localSections[key];
+			const newSection: PromptSection = {
+				enabled: checked,
+				mode: currentSection.mode,
+			};
 			setLocalSections((prev) => ({
 				...prev,
-				[key]: { ...prev[key], enabled: checked },
+				[key]: newSection,
 			}));
-			saveAllSections(key, buildSections({ key, enabled: checked }));
+			saveAllSections(key, buildSections({ key, section: newSection }));
 		},
-		[buildSections, saveAllSections],
+		[localSections, buildSections, saveAllSections],
 	);
 
-	// Generic save handler
 	const handleSave = useCallback(
 		(key: SectionKey, content: string) => {
+			const currentSection = localSections[key];
+			const newSection: PromptSection = {
+				enabled: currentSection.enabled,
+				mode: { mode: "manual", content },
+			};
 			setLocalSections((prev) => ({
 				...prev,
-				[key]: { ...prev[key], content },
+				[key]: newSection,
 			}));
-			saveAllSections(key, buildSections({ key, content }));
+			saveAllSections(key, buildSections({ key, section: newSection }));
 		},
-		[buildSections, saveAllSections],
+		[localSections, buildSections, saveAllSections],
 	);
 
-	// Generic reset handler
 	const handleReset = useCallback(
 		(key: SectionKey) => {
-			const defaultContent = defaultSections?.[key] ?? "";
+			const currentSection = localSections[key];
+			const newSection: PromptSection = {
+				enabled: currentSection.enabled,
+				mode: { mode: "manual", content: defaultSections?.[key] ?? "" },
+			};
 			setLocalSections((prev) => ({
 				...prev,
-				[key]: { ...prev[key], content: defaultContent },
+				[key]: newSection,
 			}));
-			saveAllSections(key, buildSections({ key, content: null }));
+			saveAllSections(key, buildSections({ key, section: newSection }));
 		},
-		[defaultSections, buildSections, saveAllSections],
+		[localSections, defaultSections, buildSections, saveAllSections],
 	);
 
-	// Auto toggle handler - when switching to auto, content is sent as null (use server default)
 	const handleAutoToggle = useCallback(
-		(key: SectionKey, auto: boolean) => {
+		(key: SectionKey) => {
+			const currentSection = localSections[key];
+
+			const newMode = match(currentSection.mode)
+				.with({ mode: "auto" }, () => ({
+					mode: "manual" as const,
+					content: defaultSections?.[key] ?? "",
+				}))
+				.with({ mode: "manual" }, () => ({ mode: "auto" as const }))
+				.exhaustive();
+
+			const newSection: PromptSection = {
+				enabled: currentSection.enabled,
+				mode: newMode,
+			};
+
 			setLocalSections((prev) => ({
 				...prev,
-				[key]: { ...prev[key], auto },
+				[key]: newSection,
 			}));
-			saveAllSections(key, buildSections({ key, auto }));
+			saveAllSections(key, buildSections({ key, section: newSection }));
 		},
-		[buildSections, saveAllSections],
+		[localSections, defaultSections, buildSections, saveAllSections],
 	);
 
 	return (
@@ -253,11 +204,17 @@ export function PromptSettings() {
 							description="Filler word removal, punctuation, capitalization"
 							enabled={true}
 							hideToggle={true}
-							initialContent={localSections.main.content}
+							initialContent={match(localSections.main.mode)
+								.with({ mode: "auto" }, () => defaultSections?.main ?? "")
+								.with({ mode: "manual" }, (m) => m.content)
+								.exhaustive()}
 							defaultContent={defaultSections?.main ?? ""}
 							hasCustom={hasCustomContent.main}
-							auto={localSections.main.auto}
-							onAutoToggle={(auto) => handleAutoToggle("main", auto)}
+							auto={match(localSections.main.mode)
+								.with({ mode: "auto" }, () => true)
+								.with({ mode: "manual" }, () => false)
+								.exhaustive()}
+							onAutoToggle={() => handleAutoToggle("main")}
 							showAutoToggle={true}
 							onToggle={() => {}}
 							onSave={(content) => handleSave("main", content)}
@@ -271,11 +228,17 @@ export function PromptSettings() {
 							title="Advanced Features"
 							description='E.g. backtrack corrections ("scratch that") and list formatting'
 							enabled={localSections.advanced.enabled}
-							initialContent={localSections.advanced.content}
+							initialContent={match(localSections.advanced.mode)
+								.with({ mode: "auto" }, () => defaultSections?.advanced ?? "")
+								.with({ mode: "manual" }, (m) => m.content)
+								.exhaustive()}
 							defaultContent={defaultSections?.advanced ?? ""}
 							hasCustom={hasCustomContent.advanced}
-							auto={localSections.advanced.auto}
-							onAutoToggle={(auto) => handleAutoToggle("advanced", auto)}
+							auto={match(localSections.advanced.mode)
+								.with({ mode: "auto" }, () => true)
+								.with({ mode: "manual" }, () => false)
+								.exhaustive()}
+							onAutoToggle={() => handleAutoToggle("advanced")}
 							showAutoToggle={true}
 							onToggle={(checked) => handleToggle("advanced", checked)}
 							onSave={(content) => handleSave("advanced", content)}
@@ -289,7 +252,10 @@ export function PromptSettings() {
 							title="Personal Dictionary"
 							description="Custom word mappings for technical terms"
 							enabled={localSections.dictionary.enabled}
-							initialContent={localSections.dictionary.content}
+							initialContent={match(localSections.dictionary.mode)
+								.with({ mode: "auto" }, () => defaultSections?.dictionary ?? "")
+								.with({ mode: "manual" }, (m) => m.content)
+								.exhaustive()}
 							defaultContent={defaultSections?.dictionary ?? ""}
 							hasCustom={hasCustomContent.dictionary}
 							showAutoToggle={false}

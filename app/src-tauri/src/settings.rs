@@ -177,17 +177,25 @@ impl HotkeyConfig {
 // PROMPT SECTION TYPES
 // ============================================================================
 
-/// Configuration for a single prompt section.
-/// Discriminated union using `mode` as the tag.
+/// Mode of prompt: auto (let server optimize) or manual (custom content)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "mode")]
-pub enum PromptSection {
-    /// Auto mode: use the server's built-in default prompt
+pub enum PromptMode {
+    /// Let the server optimize the prompt
     #[serde(rename = "auto")]
-    Auto { enabled: bool },
-    /// Manual mode: use custom content provided by the user
+    Auto,
+    /// Use custom content provided by the user
     #[serde(rename = "manual")]
-    Manual { enabled: bool, content: String },
+    Manual { content: String },
+}
+
+/// Configuration for a single prompt section.
+/// Two-layer structure: enabled status + mode (auto/manual)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PromptSection {
+    pub enabled: bool,
+    #[serde(rename = "mode")]
+    pub prompt_mode: PromptMode,
 }
 
 /// Configuration for all cleanup prompt sections
@@ -196,6 +204,25 @@ pub struct CleanupPromptSections {
     pub main: PromptSection,
     pub advanced: PromptSection,
     pub dictionary: PromptSection,
+}
+
+impl Default for CleanupPromptSections {
+    fn default() -> Self {
+        Self {
+            main: PromptSection {
+                enabled: true,
+                prompt_mode: PromptMode::Auto,
+            },
+            advanced: PromptSection {
+                enabled: true,
+                prompt_mode: PromptMode::Auto,
+            },
+            dictionary: PromptSection {
+                enabled: false,
+                prompt_mode: PromptMode::Auto,
+            },
+        }
+    }
 }
 
 // ============================================================================
@@ -210,6 +237,7 @@ pub struct AppSettings {
     pub paste_last_hotkey: HotkeyConfig,
     pub selected_mic_id: Option<String>,
     pub sound_enabled: bool,
+    #[serde(default)]
     pub cleanup_prompt_sections: Option<CleanupPromptSections>,
     pub stt_provider: String,
     pub llm_provider: String,
