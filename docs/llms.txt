@@ -1,0 +1,26 @@
+# Tambourine
+
+> Open-source AI voice dictation platform. Speak naturally, text appears at cursor.
+> Multi-provider STT/LLM support, customizable prompts, cross-platform desktop app.
+
+Tambourine is your personal voice interface for any app. Real-time speech-to-text
+with AI-powered formatting—removes filler words, adds punctuation, applies your
+personal dictionary.
+
+## Documentation
+
+- [README](https://github.com/kstonekuan/tambourine-voice/blob/main/README.md): Setup, features, architecture, API reference
+- [Contributing](https://github.com/kstonekuan/tambourine-voice/blob/main/CONTRIBUTING.md): Development setup, code quality, PR process
+- [Full Documentation](./llms-full.txt): All docs compiled into one file
+
+## Prompt Examples
+
+- [Default Prompts](https://github.com/kstonekuan/tambourine-voice/tree/main/examples/default): Core formatting, backtrack corrections, dictionary
+- [Immunology](https://github.com/kstonekuan/tambourine-voice/tree/main/examples/immunology): Medical terminology
+- [Legal Contracts](https://github.com/kstonekuan/tambourine-voice/tree/main/examples/legal-contracts): Legal document formatting
+- [Legal Transcription](https://github.com/kstonekuan/tambourine-voice/tree/main/examples/legal-transcription): Court transcription
+
+## Optional
+
+- [Release Process](https://github.com/kstonekuan/tambourine-voice/blob/main/RELEASING.md): Build instructions
+- [Landing Page](./index.md): Marketing overview

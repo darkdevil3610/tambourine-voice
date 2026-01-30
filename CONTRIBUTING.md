@@ -148,6 +148,14 @@ The `examples/` directory contains pre-built prompt configurations for different
 3. Copy the 3 `.md` files to a new directory in `examples/` (use lowercase with hyphens, e.g., `medical-transcription`)
 4. Test by importing and performing dictation
 
+### Updating LLM Documentation
+
+When modifying README.md or CONTRIBUTING.md, regenerate llms-full.txt:
+
+```bash
+./scripts/generate-llms-full.sh
+```
+
 ## Questions?
 
 Open an issue, start a [GitHub Discussion](https://github.com/kstonekuan/tambourine-voice/discussions), or join the [Discord server](https://discord.gg/dUyuXWVJ2a).
