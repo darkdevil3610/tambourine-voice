@@ -276,6 +276,8 @@ async def run_pipeline(
         # Handle the typed message with exhaustive pattern matching
         match parsed:
             case StartRecordingMessage():
+                if parsed.data and parsed.data.focus_context is not None:
+                    context_manager.set_focus_context(parsed.data.focus_context)
                 llm_gate.reset_for_recording()
                 await context_manager.reset_aggregator()
                 await turn_controller.start_recording()

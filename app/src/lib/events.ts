@@ -9,6 +9,7 @@
  */
 
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { FocusContextSnapshot } from "./focus";
 
 // =============================================================================
 // Event Names - Must match src-tauri/src/events.rs
@@ -47,6 +48,9 @@ export const AppEvents = {
 
 	// Main → Overlay: Provider change request (pessimistic updates)
 	providerChangeRequest: "provider-change-request",
+
+	// Rust → All: Focus context updates
+	focusContextChanged: "focus-context-changed",
 } as const;
 
 // =============================================================================
@@ -106,6 +110,7 @@ export interface EventPayloads {
 	[AppEvents.historyChanged]: undefined;
 	[AppEvents.llmError]: LLMErrorPayload;
 	[AppEvents.providerChangeRequest]: ProviderChangeRequestPayload;
+	[AppEvents.focusContextChanged]: FocusContextSnapshot;
 }
 
 // =============================================================================

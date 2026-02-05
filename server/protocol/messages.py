@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from loguru import logger
-from pydantic import BaseModel, Field, RootModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from protocol.providers import LLMProviderSelection, STTProviderSelection
 
@@ -33,18 +33,84 @@ class SettingName(StrEnum):
 
 
 # =============================================================================
+# Focus Context Types (Client -> Server)
+# =============================================================================
+
+
+class FocusEventSource(StrEnum):
+    """Source of focus context data."""
+
+    POLLING = "polling"
+    ACCESSIBILITY = "accessibility"
+    UIA = "uia"
+    UNKNOWN = "unknown"
+
+
+class FocusConfidenceLevel(StrEnum):
+    """Confidence level of focus context data."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class FocusedApplication(BaseModel):
+    """Focused application details."""
+
+    display_name: str
+    bundle_id: str | None = None
+    process_path: str | None = None
+
+
+class FocusedWindow(BaseModel):
+    """Focused window details."""
+
+    title: str
+
+
+class FocusedBrowserTab(BaseModel):
+    """Focused browser tab details (best-effort)."""
+
+    title: str | None = None
+    url: str | None = None
+    browser: str | None = None
+
+
+class FocusContextSnapshot(BaseModel):
+    """Snapshot of current focus context."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    focused_application: FocusedApplication | None = None
+    focused_window: FocusedWindow | None = None
+    focused_browser_tab: FocusedBrowserTab | None = None
+    event_source: FocusEventSource = FocusEventSource.UNKNOWN
+    confidence_level: FocusConfidenceLevel = FocusConfidenceLevel.LOW
+    privacy_filtered: bool = False
+    captured_at: str
+
+
+# =============================================================================
 # Client Messages - Recording
 # =============================================================================
+
+
+class StartRecordingData(BaseModel):
+    """Optional data payload for start-recording message."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    focus_context: FocusContextSnapshot | None = None
 
 
 class StartRecordingMessage(BaseModel):
     """Client request to start recording audio.
 
-    This is a simple marker message with no data payload.
     LLM formatting is controlled globally via the /api/config/llm-formatting endpoint.
     """
 
     type: Literal["start-recording"]
+    data: StartRecordingData | None = None
 
 
 class StopRecordingMessage(BaseModel):

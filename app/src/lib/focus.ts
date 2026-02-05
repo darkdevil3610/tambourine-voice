@@ -1,0 +1,36 @@
+export type FocusEventSource = "polling" | "accessibility" | "uia" | "unknown";
+export type FocusConfidenceLevel = "high" | "medium" | "low";
+
+export type FocusedApplication = {
+	display_name: string;
+	bundle_id?: string | null;
+	process_path?: string | null;
+};
+
+export type FocusedWindow = {
+	title: string;
+};
+
+export type FocusedBrowserTab = {
+	title?: string | null;
+	url?: string | null;
+	browser?: string | null;
+};
+
+export type FocusContextSnapshot = {
+	focused_application?: FocusedApplication | null;
+	focused_window?: FocusedWindow | null;
+	focused_browser_tab?: FocusedBrowserTab | null;
+	event_source: FocusEventSource;
+	confidence_level: FocusConfidenceLevel;
+	privacy_filtered: boolean;
+	captured_at: string;
+};
+
+export type FocusTrackingCapabilities = {
+	supports_focused_application_detection: boolean;
+	supports_focused_window_detection: boolean;
+	supports_focused_browser_tab_detection: boolean;
+	supports_realtime_event_streaming: boolean;
+	supports_private_browsing_detection: boolean;
+};

@@ -1,207 +1,137 @@
 # Focus Context Capture + Prompt Injection (Windows + macOS)
 
 ## Summary
-Add a cross-platform, best-effort focus context snapshot in the Tauri backend. The backend continuously pushes the newest focus context to the TypeScript frontend (instant access for UI/logic). The frontend only sends focus context to the Python server when recording starts. The server stores the latest focus context per connection and injects it into the LLM system prompt at the start of each recording. Browser tab URL/title are attempted when possible; if unavailable, they are omitted with low confidence metadata.
+Add a cross-platform, best-effort focus context snapshot in the Tauri backend. The backend continuously pushes the newest focus context to the TypeScript frontend. The frontend only sends focus context to the Python server when recording starts. The server injects focus context into the LLM system prompt at the start of each recording. Browser tab URL/title are best-effort and privacy-filtered.
 
 ## High-Level Flow
-1. Tauri focus watcher detects changes and emits `focus://context-changed` to the frontend.
-2. Frontend maintains `latestFocusContext` in memory for instant access.
-3. On recording start, frontend sends `latestFocusContext` to the server via RTVI.
-4. Server stores the snapshot and injects it into the system prompt for that recording.
+- [x] Tauri focus watcher emits `focus-context-changed` to the frontend.
+- [x] Frontend maintains `latestFocusContext` in memory.
+- [x] Frontend sends focus context in `start-recording` payload.
+- [x] Server injects focus context into the system prompt for the recording.
 
 ## Public API / Interface Changes
-1. Tauri commands (new):
-- `focus_get_current_context`: returns a `FocusContextSnapshot` payload (used for immediate fetch if needed).
-- `focus_get_capabilities`: returns `FocusTrackingCapabilities` (compile-time + runtime best-effort).
+- [x] `focus_get_current_context` Tauri command.
+- [x] `focus_get_capabilities` Tauri command.
+- [x] `focus-context-changed` event with `FocusContextSnapshot` payload.
+- [x] `start-recording` carries optional `data.focus_context`.
+- [x] Privacy setting `send_focus_context_enabled` with warning.
 
-2. Tauri event stream (new):
-- `focus://context-changed` event carrying `FocusContextSnapshot` payloads to the TypeScript frontend.
-
-3. RTVI client message (new):
-- `type: "focus-context"` with `data: FocusContextSnapshot`.
-
-4. Server prompt injection:
-- `DictationContextManager` appends a `Focus Context` system message when available.
-
-## Implementation Plan
-
-### 1) Define Focus Types (shared shape)
-
-Rust (Tauri)
-- Create `app/src-tauri/src/focus/` with:
-  - `FocusContextSnapshot`
-    - `focused_application`: `{ display_name, bundle_id?, process_path? } | None`
-    - `focused_window`: `{ title } | None`
-    - `focused_browser_tab`: `{ title?, url?, browser? } | None`
-    - `event_source`: `"polling" | "accessibility" | "uia" | "unknown"`
-    - `confidence_level`: `"high" | "medium" | "low"`
-    - `privacy_filtered`: `bool`
-    - `captured_at`: ISO string or epoch millis
-  - `FocusTrackingCapabilities`
-    - `supports_focused_application_detection`
-    - `supports_focused_window_detection`
-    - `supports_focused_browser_tab_detection`
-    - `supports_realtime_event_streaming` (always `false` for this MVP)
-    - `supports_private_browsing_detection` (initially `false`)
-
-Python (server)
-- Add the same shape in `server/protocol/messages.py`:
-  - `FocusedApplication`, `FocusedWindow`, `FocusedBrowserTab`
-  - `FocusEventSource`, `FocusConfidenceLevel`
-  - `FocusContextSnapshot`
-  - `FocusContextMessage` with `type: "focus-context"` and `data: FocusContextSnapshot`
-
-### 2) Platform Libraries and APIs (explicit choices)
-
-Windows
-- Win32:
+## Implementation Details (Design Decisions)
+### Windows APIs
+- Win32 window + process:
   - `GetForegroundWindow`, `GetWindowTextW`
   - `GetWindowThreadProcessId`, `OpenProcess`, `QueryFullProcessImageNameW`
-- UI Automation (accessibility tree, no screenshots):
-  - Use `IUIAutomation` to traverse the focused window subtree
-  - Browser adapters for Chromium-based browsers first (Chrome, Edge, Brave, Opera)
+- UI Automation (pending):
+  - `IUIAutomation` to traverse the accessibility tree (no screenshots)
+  - Chromium family adapters first (Chrome, Edge, Brave, Opera)
 
-macOS
-- Rust crates:
+### macOS APIs and Crates
+- Crates:
   - `objc2`, `objc2-foundation`, `objc2-app-kit`, `objc2-accessibility`
   - `core-foundation`, `core-graphics`
 - APIs:
   - `NSWorkspace.sharedWorkspace.frontmostApplication`
-  - `AXUIElement`, `AXObserver` for focused window/element
+  - `AXUIElement`, `AXObserver` for focused window/tab
 
-### 3) Tauri Backend: Windows + macOS Snapshot
+### Capability + Quality Model
+- `FocusEventSource`: `polling | accessibility | uia | unknown`
+- `FocusConfidenceLevel`: `high | medium | low`
+- `FocusTrackingCapabilities` flags:
+  - `supports_focused_application_detection`
+  - `supports_focused_window_detection`
+  - `supports_focused_browser_tab_detection`
+  - `supports_realtime_event_streaming`
+  - `supports_private_browsing_detection`
 
-Windows (new file `app/src-tauri/src/focus/windows.rs`)
-- Use `GetForegroundWindow` -> `GetWindowTextW` for window title.
-- Use `GetWindowThreadProcessId` -> `OpenProcess` + `QueryFullProcessImageNameW` for process path + display name.
-- Browser tab best-effort:
-  - UI Automation (UIA) reads the accessibility tree, not screenshots or pixel scraping.
-  - If process name is in `[chrome, msedge, brave, opera]`, attempt UI Automation (UIA) to locate address bar and tab title.
-  - If UIA is unavailable or fails, fall back to window title only.
-- Set `event_source` to `uia` if UIA succeeds, else `polling`.
-- `confidence_level`: `high` for app/window, `medium` for tab title from window title, `low` if URL missing.
+### Design Decisions Made During Implementation
+- Focus context is sent inside `start-recording` payload to avoid message ordering issues.
+- Server stores focus context briefly to inject into the prompt for that recording only.
+- Forward compatibility enforced with `extra="ignore"` on focus-related Pydantic models.
+- Focus watcher emits only when semantic fields change, with debounce for noise reduction.
+- Privacy control defaults to enabled, with a warning on disable.
 
-macOS (new file `app/src-tauri/src/focus/macos.rs`)
-- Use `NSWorkspace.sharedWorkspace.frontmostApplication` to get app name + bundle ID.
-- Use Accessibility (`AXUIElement`) to get focused window title.
-- Browser tab best-effort:
-  - For Safari/Chrome/Edge/Brave, attempt `AXURL` and tab title via accessibility tree.
-  - Fallback to window title only if URL unavailable.
-- Accessibility permission should already be granted for text insertion; treat missing permission as unexpected but still fall back to `focused_window: None`, `focused_browser_tab: None`, `confidence_level: low`, `privacy_filtered: true`.
+## Implementation Checklist
 
-Shared
-- Provide `focus_get_current_context` command that dispatches to the platform module.
-- Provide `focus_get_capabilities` with compile-time constants and runtime checks (e.g., accessibility permission).
-- Add a background focus watcher that emits `focus://context-changed` events to the frontend when context changes (with debounce).
+### Shared Types
+- [x] Rust `FocusContextSnapshot`, `FocusedApplication`, `FocusedWindow`, `FocusedBrowserTab`.
+Focus context includes app, window, and tab fields plus `event_source`, `confidence_level`, `privacy_filtered`, and `captured_at`.
+- [x] Rust `FocusEventSource`, `FocusConfidenceLevel`.
+Event sources: `polling | accessibility | uia | unknown`. Confidence: `high | medium | low`.
+- [x] Rust `FocusTrackingCapabilities`.
+Capabilities include app/window/tab detection, realtime streaming, and private browsing detection flags.
+- [x] TS `FocusContextSnapshot` and `FocusTrackingCapabilities`.
+Types live in `app/src/lib/focus.ts` and are re-used by events and APIs.
+- [x] Server `FocusContextSnapshot` and related models.
+Server accepts focus context on `start-recording` with forward-compatible parsing.
 
-Watcher defaults
-- Focus switch debounce: 50-100ms
-- Browser tab switch debounce: 25-50ms
-- Stale browser tab timeout: 1-2s
+### Tauri Backend
+- [x] `app/src-tauri/src/focus/mod.rs` module created.
+- [x] Focus watcher loop with debounce and semantic dedupe.
+Polls every 250ms, debounces 75ms, and dedupes on semantic key (app/window/tab + confidence).
+- [x] `focus_get_current_context` command.
+Returns a snapshot directly for diagnostics or on-demand use.
+- [x] `focus_get_capabilities` command.
+Returns capability flags for UI to adapt.
+- [x] Watcher started in `.setup()` and emits `focus-context-changed`.
+Event payload is `FocusContextSnapshot`.
+- [x] `AppState` stores watcher handle.
+Allows graceful shutdown and later extensions.
 
-Code outline (Rust)
-- New module: `app/src-tauri/src/focus/mod.rs`
-  - `pub mod windows;` / `pub mod macos;`
-  - `pub struct FocusContextSnapshot { ... }`
-  - `pub struct FocusTrackingCapabilities { ... }`
-  - `pub enum FocusEventSource { Polling, Accessibility, Uia, Unknown }`
-  - `pub enum FocusConfidenceLevel { High, Medium, Low }`
-  - `pub fn get_current_focus_context() -> FocusContextSnapshot`
-  - `pub fn get_focus_capabilities() -> FocusTrackingCapabilities`
-- New watcher: `app/src-tauri/src/focus/watcher.rs`
-  - `pub fn start_focus_watcher(app: AppHandle) -> FocusWatcherHandle`
-  - Polls every 250ms, compares semantic fields, applies debounce, emits `focus://context-changed`.
-  - Keeps last snapshot in memory to avoid duplicate emits.
-- Tauri commands in `app/src-tauri/src/lib.rs`
-  - `#[tauri::command] fn focus_get_current_context() -> FocusContextSnapshot`
-  - `#[tauri::command] fn focus_get_capabilities() -> FocusTrackingCapabilities`
-  - Start the watcher in `setup()` and store handle in `AppState` for clean shutdown if needed.
+### Windows Focus Capture
+- [x] Foreground window title via `GetForegroundWindow` + `GetWindowTextW`.
+- [x] Process path via `GetWindowThreadProcessId` + `OpenProcess` + `QueryFullProcessImageNameW`.
+- [x] App display name from process path.
+- [x] Browser tab title inferred from window title.
+Title inference trims `" - "` suffix when present.
+- [ ] UI Automation (UIA) for URL + tab title.
+Use `IUIAutomation` to locate address bar and active tab title for Chromium browsers.
+- [ ] URL privacy filtering (origin + path, no query).
+Strip query parameters and fragments before sending to the server.
 
-### 4) Frontend: Subscribe + Send at Recording Start
+### macOS Focus Capture
+- [x] Frontmost app via `NSWorkspace.sharedWorkspace.frontmostApplication`.
+- [ ] Focused window title via Accessibility (`AXUIElement`).
+Use AX focused window or focused UI element when available.
+- [ ] Browser tab title/URL via Accessibility tree.
+Attempt Safari/Chrome/Edge/Brave with AXURL and active tab title.
+- [ ] Accessibility permission check with low-confidence fallback.
+If permission missing, return `privacy_filtered=true` with low confidence.
 
-`app/src/lib/tauri.ts`
-- Add `focusGetCurrentContext()` and `focusGetCapabilities()` using `invoke`.
-- Add `onFocusContextChanged()` event listener.
+### Frontend
+- [x] `focus-context-changed` event wiring in `tauriAPI`.
+`tauriAPI.onFocusContextChanged` uses typed payloads.
+- [x] Overlay listener updates `latestFocusContextRef`.
+Ref is updated in a dedicated `useEffect`.
+- [x] `start-recording` includes optional focus context payload.
+Payload is gated by `send_focus_context_enabled`.
+- [x] Privacy toggle in settings UI with warning.
+Modal warns about dictation quality impact when disabling.
 
-`app/src/OverlayApp.tsx`
-- Maintain `latestFocusContext` from `focus://context-changed`.
-- On recording start, send `latestFocusContext` if present:
-  - `safeSendClientMessage(client, "focus-context", latestFocusContext, ...)`
-  - Then send `start-recording`
-- If no snapshot is available, log and continue without context.
+### Server
+- [x] Parse `start-recording` with optional `data.focus_context`.
+`StartRecordingData` and `FocusContextSnapshot` accept extra fields.
+- [x] Store focus context on `DictationContextManager`.
+Snapshot is stored per connection before `reset_context_for_new_recording`.
+- [x] Prompt injection with freshness window.
+Only injects when captured within 5 seconds.
+- [x] Forward-compat parsing for focus context data.
+`ConfigDict(extra=\"ignore\")` used in Pydantic models.
 
-Code outline (TypeScript)
-- `app/src/lib/tauri.ts`
-  - `export type FocusContextSnapshot = { ... }`
-  - `export function focusGetCurrentContext(): Promise<FocusContextSnapshot>`
-  - `export function focusGetCapabilities(): Promise<FocusTrackingCapabilities>`
-  - `export function onFocusContextChanged(cb: (payload: FocusContextSnapshot) => void): Promise<UnlistenFn>`
-- `app/src/lib/events.ts`
-  - Add event name `focusContextChanged: "focus-context-changed"` (or keep `focus://context-changed` as raw)
-  - Add payload typing to `EventPayloads`
-- `app/src/OverlayApp.tsx`
-  - `const latestFocusContextRef = useRef<FocusContextSnapshot | null>(null);`
-  - On event, update ref immediately.
-  - On start-recording, send `latestFocusContextRef.current` if non-null.
+### Settings Export/Import
+- [x] `send_focus_context_enabled` stored in settings.
+- [x] Export includes `send_focus_context_enabled`.
+- [x] Import and factory reset include `send_focus_context_enabled`.
 
-### 5) Server: Store Focus Context + Inject into Prompt
+## Defaults
+- [x] Focus poll interval: 250ms.
+- [x] Debounce: 75ms.
+- [x] Focus freshness window: 5s.
+- [x] `send_focus_context_enabled` default: true.
 
-`server/protocol/messages.py`
-- Add new client message type `FocusContextMessage` to the discriminated union.
-- Update `parse_client_message`.
-
-`server/main.py`
-- In `on_client_message`, handle `FocusContextMessage`:
-  - `context_manager.set_focus_context(parsed.data)`
-
-`server/processors/context_manager.py`
-- Add `_focus_context: FocusContextSnapshot | None`
-- Add `set_focus_context(...)`
-- In `reset_context_for_new_recording`, append a second system message after the existing prompt:
-  -
-    ```
-    Focus Context (best-effort, may be incomplete):
-    - Application: ...
-    - Window: ...
-    - Browser Tab: ... (URL origin only if available)
-    ```
-- Only include the block if `focus_context` is present and not stale (e.g., captured within 5 seconds).
-
-Code outline (Python)
-- `server/protocol/messages.py`
-  - `class FocusedApplication(BaseModel): display_name: str; bundle_id: str | None; process_path: str | None`
-  - `class FocusedWindow(BaseModel): title: str`
-  - `class FocusedBrowserTab(BaseModel): title: str | None; url: str | None; browser: str | None`
-  - `class FocusContextSnapshot(BaseModel): ...`
-  - `class FocusContextMessage(BaseModel): type: Literal["focus-context"]; data: FocusContextSnapshot`
-  - Add to `_ClientMessageUnion`
-- `server/processors/context_manager.py`
-  - `def set_focus_context(self, focus: FocusContextSnapshot) -> None: self._focus_context = focus`
-  - `def _format_focus_context_block(self) -> str` helper
-  - `def _is_focus_context_fresh(self, now: datetime) -> bool` helper
-- `server/main.py`
-  - In `on_client_message`, handle `FocusContextMessage()` by calling `context_manager.set_focus_context(...)`.
-
-## Test Cases and Scenarios
-
-Server (Python)
-- `test_focus_context_message_parsing`: validates `FocusContextMessage` parsing.
-- `test_focus_prompt_injection`: verifies the system prompt includes the focus block only when snapshot is present.
-- `test_focus_context_stale`: stale snapshots are ignored.
-
-Tauri (Rust, unit)
-- `focus_snapshot_windows_returns_title`: mocked foreground window produces expected fields.
-- `focus_snapshot_macos_without_accessibility`: returns low confidence and no window/tab.
-
-Manual / Integration
-- Start recording while focused on:
-  1. A native app (e.g., Notepad/TextEdit) -> app + window title shown.
-  2. Chrome/Edge -> tab title + URL when available.
-  3. Accessibility disabled on macOS -> focus block omitted or low confidence.
-
-## Assumptions and Defaults
-- Send timing: only at recording start.
-- OS support: Windows + macOS in this first pass.
-- Browser tab extraction: best-effort via UIA on Windows and accessibility on macOS; no extension yet.
-- Privacy defaults: omit URL query parameters; include origin and path only if available.
-- If focus is the Tambourine app itself: keep the snapshot but allow it to be overwritten on next recording.
+## Outstanding Work
+- [ ] Windows UIA-based tab URL/title extraction.
+Implement `IUIAutomation` adapter for Chromium browsers to extract address bar URL and active tab title.
+- [ ] macOS Accessibility-based window + tab extraction.
+Use `AXUIElement` to read focused window title and `AXURL`/tab title where exposed.
+- [ ] URL privacy filter when URLs are available.
+Normalize URLs to origin + path, drop query and fragment before sending to server.

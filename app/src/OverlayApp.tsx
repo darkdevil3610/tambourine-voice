@@ -27,6 +27,7 @@ import {
 	useConnectionState,
 } from "./contexts/ConnectionContext";
 import { useNativeAudioTrack } from "./hooks/useNativeAudioTrack";
+import type { FocusContextSnapshot } from "./lib/focus";
 import { useAddHistoryEntry, useSettings, useTypeText } from "./lib/queries";
 import {
 	type ConfigMessage,
@@ -238,6 +239,7 @@ function RecordingControl() {
 	// State and refs for mic acquisition optimization
 	const [isMicAcquiring, setIsMicAcquiring] = useState(false);
 	const micPreparedRef = useRef(false);
+	const latestFocusContextRef = useRef<FocusContextSnapshot | null>(null);
 	// Track the last mic device ID used for capture
 	// undefined = never started, null = system default, string = specific device
 	const lastMicIdRef = useRef<string | null | undefined>(undefined);
@@ -367,8 +369,16 @@ function RecordingControl() {
 				// Signal server to start turn management
 				// LLM formatting is now controlled globally via the config API
 				// Use safe send to detect communication failures and trigger reconnection
-				safeSendClientMessage(client, "start-recording", {}, (error) =>
-					send({ type: "COMMUNICATION_ERROR", error }),
+				const startRecordingData =
+					settings?.send_focus_context_enabled === false ||
+					!latestFocusContextRef.current
+						? {}
+						: { focus_context: latestFocusContextRef.current };
+				safeSendClientMessage(
+					client,
+					"start-recording",
+					startRecordingData,
+					(error) => send({ type: "COMMUNICATION_ERROR", error }),
 				);
 			}
 		} catch (error) {
@@ -379,6 +389,7 @@ function RecordingControl() {
 	}, [
 		client,
 		settings?.selected_mic_id,
+		settings?.send_focus_context_enabled,
 		isNativeAudioReady,
 		nativeAudioTrack,
 		startNativeCapture,
@@ -531,6 +542,23 @@ function RecordingControl() {
 			unlisten?.();
 		};
 	}, [queryClient]);
+
+	// Listen for focus context updates from Rust
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+
+		const setup = async () => {
+			unlisten = await tauriAPI.onFocusContextChanged((payload) => {
+				latestFocusContextRef.current = payload;
+			});
+		};
+
+		setup();
+
+		return () => {
+			unlisten?.();
+		};
+	}, []);
 
 	// Listen for disconnect request from Rust (triggered on app quit)
 	useEffect(() => {

@@ -7,6 +7,7 @@ import {
 	useSettings,
 	useUpdateCleanupPromptSections,
 	useUpdateLLMFormattingEnabled,
+	useUpdateSendFocusContextEnabled,
 } from "../../lib/queries";
 import type { CleanupPromptSections, PromptSection } from "../../lib/tauri";
 import { PromptSectionEditor } from "./PromptSectionEditor";
@@ -26,9 +27,11 @@ export function PromptSettings() {
 		useDefaultSections();
 	const updateCleanupPromptSections = useUpdateCleanupPromptSections();
 	const llmFormattingMutation = useUpdateLLMFormattingEnabled();
+	const focusContextMutation = useUpdateSendFocusContextEnabled();
 
 	// Modal for warning when disabling LLM formatting
 	const [disableWarningOpened, disableWarningHandlers] = useDisclosure(false);
+	const [focusWarningOpened, focusWarningHandlers] = useDisclosure(false);
 
 	// Consolidated local state for all sections using discriminated union
 	const [localSections, setLocalSections] =
@@ -202,6 +205,19 @@ export function PromptSettings() {
 		disableWarningHandlers.close();
 	};
 
+	const handleFocusContextToggle = (checked: boolean) => {
+		if (!checked) {
+			focusWarningHandlers.open();
+		} else {
+			focusContextMutation.mutate(true);
+		}
+	};
+
+	const confirmDisableFocusContext = () => {
+		focusContextMutation.mutate(false);
+		focusWarningHandlers.close();
+	};
+
 	return (
 		<div className="settings-section animate-in animate-in-delay-4">
 			<h3 className="settings-section-title">LLM Formatting</h3>
@@ -222,6 +238,30 @@ export function PromptSettings() {
 							handleLLMFormattingToggle(event.currentTarget.checked)
 						}
 						disabled={llmFormattingMutation.isPending}
+						size="md"
+						color="gray"
+					/>
+				</div>
+			</div>
+
+			<div className="settings-card" style={{ marginBottom: 16 }}>
+				<div className="settings-row">
+					<div>
+						<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+							<p className="settings-label">Send Focus Context</p>
+							<StatusIndicator status={focusContextMutation.status} />
+						</div>
+						<p className="settings-description">
+							Share current app/window context with the server to improve
+							formatting
+						</p>
+					</div>
+					<Switch
+						checked={settings?.send_focus_context_enabled ?? true}
+						onChange={(event) =>
+							handleFocusContextToggle(event.currentTarget.checked)
+						}
+						disabled={focusContextMutation.isPending}
 						size="md"
 						color="gray"
 					/>
@@ -346,6 +386,28 @@ export function PromptSettings() {
 					</Button>
 					<Button color="red" onClick={confirmDisableLLMFormatting}>
 						Disable Formatting
+					</Button>
+				</div>
+			</Modal>
+
+			{/* Warning modal when disabling focus context */}
+			<Modal
+				opened={focusWarningOpened}
+				onClose={focusWarningHandlers.close}
+				title="Disable focus context?"
+				centered
+				size="md"
+			>
+				<Text size="sm" mb="md">
+					Disabling focus context may reduce dictation quality because the
+					server won't know which app or document you're working in.
+				</Text>
+				<div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+					<Button variant="default" onClick={focusWarningHandlers.close}>
+						Cancel
+					</Button>
+					<Button color="red" onClick={confirmDisableFocusContext}>
+						Disable Focus Context
 					</Button>
 				</div>
 			</Modal>

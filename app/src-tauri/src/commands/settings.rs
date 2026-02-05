@@ -148,6 +148,11 @@ pub fn get_settings(app: AppHandle) -> Result<AppSettings, String> {
             DEFAULT_SERVER_URL.to_string(),
         ),
         llm_formatting_enabled: get_setting_from_store(&app, StoreKey::LlmFormattingEnabled, true),
+        send_focus_context_enabled: get_setting_from_store(
+            &app,
+            StoreKey::SendFocusContextEnabled,
+            true,
+        ),
     })
 }
 
@@ -386,6 +391,27 @@ pub async fn update_llm_formatting_enabled(
 #[cfg(not(desktop))]
 #[tauri::command]
 pub async fn update_llm_formatting_enabled(_app: AppHandle, _enabled: bool) -> Result<(), String> {
+    Ok(())
+}
+
+/// Update send focus context setting
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn update_send_focus_context_enabled(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    crate::save_setting_to_store(&app, StoreKey::SendFocusContextEnabled, &enabled)?;
+    log::info!("Send focus context enabled: {enabled}");
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn update_send_focus_context_enabled(
+    _app: AppHandle,
+    _enabled: bool,
+) -> Result<(), String> {
     Ok(())
 }
 

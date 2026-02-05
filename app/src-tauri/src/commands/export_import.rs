@@ -43,6 +43,7 @@ pub struct SettingsExportData {
     pub auto_mute_audio: bool,
     pub stt_timeout_seconds: Option<f64>,
     pub server_url: String,
+    pub send_focus_context_enabled: bool,
 }
 
 impl From<AppSettings> for SettingsExportData {
@@ -58,6 +59,7 @@ impl From<AppSettings> for SettingsExportData {
             auto_mute_audio: settings.auto_mute_audio,
             stt_timeout_seconds: settings.stt_timeout_seconds,
             server_url: settings.server_url,
+            send_focus_context_enabled: settings.send_focus_context_enabled,
         }
     }
 }
@@ -438,6 +440,10 @@ pub async fn import_settings(
         StoreKey::ServerUrl.as_str(),
         serde_json::to_value(&settings.server_url).map_err(|e| e.to_string())?,
     );
+    store.set(
+        StoreKey::SendFocusContextEnabled.as_str(),
+        serde_json::to_value(settings.send_focus_context_enabled).map_err(|e| e.to_string())?,
+    );
 
     store
         .save()
@@ -562,6 +568,11 @@ pub async fn factory_reset(
     store.set(
         StoreKey::ServerUrl.as_str(),
         serde_json::to_value(&default_settings.server_url).map_err(|e| e.to_string())?,
+    );
+    store.set(
+        StoreKey::SendFocusContextEnabled.as_str(),
+        serde_json::to_value(default_settings.send_focus_context_enabled)
+            .map_err(|e| e.to_string())?,
     );
 
     store

@@ -58,6 +58,8 @@ pub enum StoreKey {
     ServerUrl,
     /// LLM formatting enabled (true = format with LLM, false = raw transcription)
     LlmFormattingEnabled,
+    /// Send focus context to server
+    SendFocusContextEnabled,
 }
 
 impl StoreKey {
@@ -76,6 +78,7 @@ impl StoreKey {
             Self::SttTimeoutSeconds => "stt_timeout_seconds",
             Self::ServerUrl => "server_url",
             Self::LlmFormattingEnabled => "llm_formatting_enabled",
+            Self::SendFocusContextEnabled => "send_focus_context_enabled",
         }
     }
 }
@@ -283,6 +286,7 @@ impl CleanupPromptSections {
 // ============================================================================
 
 /// Complete application settings matching the TypeScript `AppSettings` interface
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub toggle_hotkey: HotkeyConfig,
@@ -300,6 +304,9 @@ pub struct AppSettings {
     /// LLM formatting enabled (true = format with LLM, false = raw transcription)
     #[serde(default = "default_enabled")]
     pub llm_formatting_enabled: bool,
+    /// Send focus context to server for prompt injection
+    #[serde(default = "default_enabled")]
+    pub send_focus_context_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -317,6 +324,7 @@ impl Default for AppSettings {
             stt_timeout_seconds: None,
             server_url: DEFAULT_SERVER_URL.to_string(),
             llm_formatting_enabled: true,
+            send_focus_context_enabled: true,
         }
     }
 }

@@ -10,9 +10,11 @@ mod audio_mute;
 mod commands;
 mod config_sync;
 pub mod events;
+mod focus;
 mod history;
 
 use events::EventName;
+use focus::{get_current_focus_context, get_focus_capabilities, start_focus_watcher_in_app};
 mod mic_capture;
 mod settings;
 mod state;
@@ -370,6 +372,18 @@ fn list_native_mic_devices(state: tauri::State<'_, MicCaptureManager>) -> Vec<Au
     state.capture().list_devices()
 }
 
+/// Get current focus context snapshot
+#[tauri::command]
+fn focus_get_current_context() -> focus::FocusContextSnapshot {
+    get_current_focus_context()
+}
+
+/// Get focus tracking capabilities
+#[tauri::command]
+fn focus_get_capabilities() -> focus::FocusTrackingCapabilities {
+    get_focus_capabilities()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)]
 pub fn run() {
@@ -414,6 +428,7 @@ pub fn run() {
             commands::settings::update_stt_timeout,
             commands::settings::update_server_url,
             commands::settings::update_llm_formatting_enabled,
+            commands::settings::update_send_focus_context_enabled,
             commands::settings::reset_hotkeys_to_defaults,
             is_audio_mute_supported,
             commands::history::add_history_entry,
@@ -437,6 +452,8 @@ pub fn run() {
             pause_native_mic,
             resume_native_mic,
             list_native_mic_devices,
+            focus_get_current_context,
+            focus_get_capabilities,
         ])
         .setup(|app| {
             // Initialize history storage
@@ -460,6 +477,14 @@ pub fn run() {
                 let _ = app_handle.emit(EventName::NativeAudioData.as_str(), audio_data);
             });
             app.manage(mic_capture_manager);
+
+            if let Some(app_state) = app.try_state::<AppState>() {
+                if let Ok(mut watcher_guard) = app_state.focus_watcher.lock() {
+                    if watcher_guard.is_none() {
+                        *watcher_guard = Some(start_focus_watcher_in_app(app.handle()));
+                    }
+                }
+            }
 
             // Register shortcuts from store (now that store plugin is available)
             // This function handles errors gracefully - it never fails the app startup

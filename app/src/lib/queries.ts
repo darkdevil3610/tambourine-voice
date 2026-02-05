@@ -468,6 +468,27 @@ export function useUpdateLLMFormattingEnabled() {
 	});
 }
 
+// Focus context sending enabled mutation
+export function useUpdateSendFocusContextEnabled() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateSendFocusContextEnabled(enabled),
+		onSuccess: (_data, enabled) => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			tauriAPI.emitSettingsChanged();
+			showSettingsSuccess(
+				`Focus context ${enabled ? "enabled" : "disabled"} for server`,
+			);
+		},
+		onError: (error) => {
+			showSettingsError(
+				`Failed to update focus context setting: ${error.message}`,
+			);
+		},
+	});
+}
+
 // =============================================================================
 // Provider Mutations with Server Confirmation
 // =============================================================================

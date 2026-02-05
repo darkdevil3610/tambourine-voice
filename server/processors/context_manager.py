@@ -9,10 +9,12 @@ with the dictation-specific requirements:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from openai.types.chat import ChatCompletionSystemMessageParam
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMAssistantAggregatorParams,
     LLMContextAggregatorPair,
@@ -21,6 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 from processors.llm import combine_prompt_sections
+from protocol.messages import FocusContextSnapshot
 from utils.logger import logger
 
 if TYPE_CHECKING:
@@ -54,6 +57,7 @@ class DictationContextManager:
 
         # Create shared context (will be reset before each recording)
         self._context = LLMContext()
+        self._focus_context: FocusContextSnapshot | None = None
 
         # Create aggregator pair with external turn control
         # External strategies mean TranscriptionBufferProcessor controls when turns start/stop
@@ -104,6 +108,65 @@ class DictationContextManager:
         self._dictionary_custom = dictionary_custom
         logger.info("Formatting prompt sections updated")
 
+    def set_focus_context(self, focus_context: FocusContextSnapshot | None) -> None:
+        """Store the latest focus context snapshot for prompt injection."""
+        self._focus_context = focus_context
+
+    def _format_focus_context_block(self, focus_context: FocusContextSnapshot) -> str:
+        focused_application = focus_context.focused_application
+        focused_window = focus_context.focused_window
+        focused_browser_tab = focus_context.focused_browser_tab
+
+        application_line = (
+            f"Application: {focused_application.display_name}"
+            if focused_application
+            else "Application: Unknown"
+        )
+
+        window_line = f"Window: {focused_window.title}" if focused_window else "Window: Unknown"
+
+        browser_line = "Browser Tab: Unknown"
+        if focused_browser_tab:
+            title_part = f"title={focused_browser_tab.title}" if focused_browser_tab.title else None
+            url_part = None
+            if focused_browser_tab.url:
+                parsed = urlparse(focused_browser_tab.url)
+                if parsed.scheme and parsed.netloc:
+                    url_part = f"url={parsed.scheme}://{parsed.netloc}{parsed.path}"
+                else:
+                    url_part = f"url={focused_browser_tab.url}"
+            browser_parts = [part for part in [title_part, url_part] if part]
+            if browser_parts:
+                browser_line = f"Browser Tab: {', '.join(browser_parts)}"
+
+        return "\n".join(
+            [
+                "Focus Context (best-effort, may be incomplete):",
+                f"- {application_line}",
+                f"- {window_line}",
+                f"- {browser_line}",
+            ]
+        )
+
+    def _parse_captured_at(self, captured_at: str) -> datetime | None:
+        if captured_at.isdigit():
+            return datetime.fromtimestamp(int(captured_at), tz=UTC)
+        normalized = captured_at.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
+
+    def _is_focus_context_fresh(self, focus_context: FocusContextSnapshot) -> bool:
+        captured_at = self._parse_captured_at(focus_context.captured_at)
+        if captured_at is None:
+            return False
+        age_seconds = (datetime.now(tz=UTC) - captured_at).total_seconds()
+        return age_seconds <= 5.0
+
     def reset_context_for_new_recording(self) -> None:
         """Reset the context for a new recording session.
 
@@ -111,9 +174,15 @@ class DictationContextManager:
         Clears all previous messages and sets the system prompt.
         This ensures each dictation is independent with no conversation history.
         """
-        self._context.set_messages(
-            [ChatCompletionSystemMessageParam(role="system", content=self.system_prompt)]
-        )
+        messages: list[LLMContextMessage] = [
+            ChatCompletionSystemMessageParam(role="system", content=self.system_prompt),
+        ]
+
+        if self._focus_context and self._is_focus_context_fresh(self._focus_context):
+            focus_block = self._format_focus_context_block(self._focus_context)
+            messages.append(ChatCompletionSystemMessageParam(role="system", content=focus_block))
+
+        self._context.set_messages(messages)
         logger.debug("Context reset for new recording")
 
     async def reset_aggregator(self) -> None:
