@@ -787,7 +787,7 @@ function RecordingControl() {
 				"connecting",
 				"reconnecting",
 				"processing",
-				() => { },
+				() => {},
 			)
 			.exhaustive();
 	}, [displayState, onStartRecording, onStopRecording]);
@@ -826,15 +826,15 @@ function RecordingControl() {
 		: isMicAcquiring
 			? ("loading" as const)
 			: match(displayState)
-				.with(
-					"processing",
-					"disconnected",
-					"connecting",
-					"reconnecting",
-					() => "loading" as const,
-				)
-				.with("idle", "recording", () => "active" as const)
-				.exhaustive();
+					.with(
+						"processing",
+						"disconnected",
+						"connecting",
+						"reconnecting",
+						() => "loading" as const,
+					)
+					.with("idle", "recording", () => "active" as const)
+					.exhaustive();
 
 	return (
 		<div

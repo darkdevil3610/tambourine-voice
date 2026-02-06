@@ -69,6 +69,7 @@ from services.providers import (
 from utils.logger import configure_logging
 from utils.observers import PipelineLogObserver
 from utils.rate_limiter import (
+    RATE_LIMIT_HEALTH,
     RATE_LIMIT_ICE,
     RATE_LIMIT_OFFER,
     RATE_LIMIT_REGISTRATION,
@@ -408,7 +409,8 @@ app.include_router(config_router)
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
+@limiter.limit(RATE_LIMIT_HEALTH, key_func=get_ip_only)
+async def health_check(request: Request) -> dict[str, str]:
     """Health check endpoint for container orchestration (e.g., Lightsail)."""
     return {"status": "ok"}
 

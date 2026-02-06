@@ -153,7 +153,7 @@ Sign up and get API keys for the providers you want to use. Some providers with 
 ```bash
 ollama run llama3.2
 ```
-Then in your `.env` file, set `OLLAMA_BASE_URL=http://localhost:11434` for local LLM and `WHISPER_ENABLED=true` for local STT.
+Then in your `.env` file, set `OLLAMA_BASE_URL=http://localhost:11434` and `OLLAMA_MODEL=llama3.2` for local LLM, and `WHISPER_ENABLED=true` for local STT.
 
 ### 2. Set Up the Server
 
@@ -251,7 +251,7 @@ The server exposes HTTP endpoints on port 8765 (default). Sample endpoints:
 - `GET /health` - Health check for container orchestration
 - `GET /api/providers` - List available STT and LLM providers
 
-See `server/main.py` for all endpoints. All endpoints are rate-limited.
+See `server/main.py` and `server/api/config_api.py` for all endpoints. All endpoints are rate-limited.
 
 ## Configuration
 
@@ -324,12 +324,6 @@ Your prompts will be updated immediately. You can further customize them in **Se
 ## Acknowledgments
 
 Built with [Tauri](https://tauri.app/) for the cross-platform desktop app and [Pipecat](https://github.com/pipecat-ai/pipecat) for the modular voice AI pipeline.
-
-## LLM-Friendly Documentation
-
-For AI assistants and automated tools:
-- [llms.txt](https://kstonekuan.github.io/tambourine-voice/llms.txt) - Navigation index
-- [llms-full.txt](https://kstonekuan.github.io/tambourine-voice/llms-full.txt) - Complete documentation
 
 ## Contributing
 
