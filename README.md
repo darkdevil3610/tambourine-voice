@@ -145,6 +145,8 @@ On macOS, Tambourine needs accessibility permissions to type text at your cursor
 
  Choose your providers (at least one STT and one LLM required):
 
+ > **Note:** The following are examples of providers with generous free tiers. Tambourine supports many more providers with paid API keys—see `server/.env.example` for the full list.
+
 | Provider | Type | Free Tier | Sign Up |
 |----------|------|-----------|---------|
 | Cartesia | STT | 3 hours/month | [cartesia.ai](https://cartesia.ai ) |
