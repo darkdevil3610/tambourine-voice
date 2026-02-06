@@ -64,7 +64,8 @@ function ConnectionStatusIndicator() {
 
 	return (
 		<Tooltip label={statusText} position="right" withArrow>
-			<div className="connection-status">
+			{/* biome-ignore lint/a11y/useSemanticElements: status role is semantically correct for dynamic connection status */}
+			<div className="connection-status" role="status" aria-label={statusText}>
 				{isConnecting ? (
 					<Loader size={10} color="gray" />
 				) : (
@@ -91,7 +92,6 @@ function Sidebar({
 					<Logo size={32} />
 				</div>
 			</header>
-
 			<nav className="sidebar-nav">
 				<Tooltip label="Home" position="right" withArrow>
 					<NavLink
@@ -100,6 +100,7 @@ function Sidebar({
 						onClick={() => onViewChange("home")}
 						variant="filled"
 						className="sidebar-nav-link"
+						aria-label="Navigate to Home"
 					/>
 				</Tooltip>
 				<Tooltip label="Settings" position="right" withArrow>
@@ -109,6 +110,7 @@ function Sidebar({
 						onClick={() => onViewChange("settings")}
 						variant="filled"
 						className="sidebar-nav-link"
+						aria-label="Navigate to Settings"
 					/>
 				</Tooltip>
 			</nav>

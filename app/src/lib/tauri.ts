@@ -34,6 +34,7 @@ export const STT_PROVIDER_IDS = ["auto", ...STT_KNOWN_PROVIDER_IDS] as const;
 /** Known LLM provider IDs (excluding "auto") */
 export const LLM_KNOWN_PROVIDER_IDS = [
 	"anthropic",
+	"bedrock",
 	"cerebras",
 	"gemini",
 	"groq",
