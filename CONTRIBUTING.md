@@ -130,8 +130,8 @@ Be respectful and constructive in all interactions. We're building this together
 
 STT and LLM providers are defined in `server/services/provider_registry.py`:
 
-1. Add enum value to `STTProviderId` or `LLMProviderId` in `protocol/providers.py`
-2. Import the pipecat service class in `provider_registry.py`
+1. Add enum value to `STTProviderId` or `LLMProviderId` in `server/protocol/providers.py`
+2. Import the pipecat service class in `server/services/provider_registry.py`
 3. Add a provider config entry to `STT_PROVIDERS` or `LLM_PROVIDERS`
 4. Add the environment variable to `.env.example`
 
@@ -147,14 +147,6 @@ The `examples/` directory contains pre-built prompt configurations for different
 2. Go to **Settings > Data Management** and click Export
 3. Copy the 3 `.md` files to a new directory in `examples/` (use lowercase with hyphens, e.g., `medical-transcription`)
 4. Test by importing and performing dictation
-
-### Updating LLM Documentation
-
-When modifying README.md or CONTRIBUTING.md, regenerate llms-full.txt:
-
-```bash
-./scripts/generate-llms-full.sh
-```
 
 ## Questions?
 
