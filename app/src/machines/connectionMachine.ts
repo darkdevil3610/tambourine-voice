@@ -65,6 +65,8 @@ type ConnectionEvents =
 	| { type: "DISCONNECTED" }
 	| { type: "RECONNECT" }
 	| { type: "START_RECORDING" }
+	| { type: "START_RECORDING_READY" }
+	| { type: "START_RECORDING_FAILED"; error: string }
 	| { type: "STOP_RECORDING" }
 	| { type: "RESPONSE_RECEIVED" }
 	| { type: "SERVER_URL_CHANGED"; serverUrl: string }
@@ -215,7 +217,7 @@ const connectActor = fromCallback<
 
 /**
  * Actor that listens for disconnect events and transport state degradation.
- * Used in 'idle', 'recording', and 'processing' states to detect:
+ * Used in connected runtime states where a client is active to detect:
  * - Server disconnection (RTVIEvent.Disconnected)
  * - Stale connections after sleep/wake (transport state drops from "ready")
  *
@@ -675,7 +677,7 @@ export const connectionMachine = setup({
 					actions: "cleanupClient",
 				},
 				START_RECORDING: {
-					target: "recording",
+					target: "startingRecording",
 					actions: "enableClientMicrophoneForRecordingIfSupported",
 				},
 				SERVER_URL_CHANGED: {
@@ -692,6 +694,73 @@ export const connectionMachine = setup({
 				RECONNECT: {
 					target: "initializing",
 					actions: [
+						"cleanupClient",
+						"emitReconnectStarted",
+						assign({ client: () => null, retryCount: () => 0 }),
+					],
+				},
+			},
+		},
+
+		// Preparing local mic capture and transport before active recording
+		startingRecording: {
+			entry: [
+				{ type: "emitConnectionState", params: { state: "startingRecording" } },
+				{ type: "logState", params: { state: "startingRecording" } },
+			],
+			invoke: {
+				// Use disconnect listener - does NOT call connect()
+				src: "disconnectListener",
+				input: ({ context }) => ({
+					client: assertClient(context),
+				}),
+			},
+			on: {
+				DISCONNECTED: {
+					target: "retrying",
+					actions: [
+						"disableClientMicrophoneAfterRecordingIfSupported",
+						"cleanupClient",
+					],
+				},
+				COMMUNICATION_ERROR: {
+					target: "retrying",
+					actions: [
+						"disableClientMicrophoneAfterRecordingIfSupported",
+						"cleanupClient",
+					],
+				},
+				START_RECORDING_READY: {
+					target: "recording",
+					actions: assign({ error: () => null }),
+				},
+				START_RECORDING_FAILED: {
+					target: "idle",
+					actions: [
+						"disableClientMicrophoneAfterRecordingIfSupported",
+						assign({ error: ({ event }) => event.error }),
+					],
+				},
+				STOP_RECORDING: {
+					target: "idle",
+					actions: "disableClientMicrophoneAfterRecordingIfSupported",
+				},
+				SERVER_URL_CHANGED: {
+					target: "initializing",
+					actions: [
+						"disableClientMicrophoneAfterRecordingIfSupported",
+						"cleanupClient",
+						assign({
+							serverUrl: ({ event }) => event.serverUrl,
+							client: () => null,
+							retryCount: () => 0,
+						}),
+					],
+				},
+				RECONNECT: {
+					target: "initializing",
+					actions: [
+						"disableClientMicrophoneAfterRecordingIfSupported",
 						"cleanupClient",
 						"emitReconnectStarted",
 						assign({ client: () => null, retryCount: () => 0 }),

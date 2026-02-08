@@ -170,6 +170,10 @@ export function ConnectionSettings() {
 				text: "Connected",
 				color: "var(--mantine-color-green-6)",
 			}))
+			.with("startingRecording", () => ({
+				text: "Connected (Starting recording)",
+				color: "var(--mantine-color-green-6)",
+			}))
 			.with("recording", () => ({
 				text: "Connected (Recording)",
 				color: "var(--mantine-color-green-6)",

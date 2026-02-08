@@ -396,11 +396,11 @@ describe("connectionMachine", () => {
 			actor.stop();
 		});
 
-		it("transitions to recording on START_RECORDING event", async () => {
+		it("transitions to starting on START_RECORDING event", async () => {
 			const { actor } = await setupIdleState();
 
 			actor.send({ type: "START_RECORDING" });
-			await waitForState(actor, "recording");
+			await waitForState(actor, "startingRecording");
 
 			actor.stop();
 		});
@@ -439,6 +439,59 @@ describe("connectionMachine", () => {
 		});
 	});
 
+	describe("State Transitions from startingRecording", () => {
+		async function setupStartingState() {
+			const { machine, callbacks } = createTestMachine({
+				createClientBehavior: "success",
+			});
+			const actor = createActor(machine);
+			actor.start();
+
+			actor.send({ type: "CONNECT", serverUrl: "http://localhost:8000" });
+			await waitForState(actor, "connecting");
+			callbacks.connectSendBack?.({ type: "CONNECTED" });
+			await waitForState(actor, "idle");
+			actor.send({ type: "START_RECORDING" });
+			await waitForState(actor, "startingRecording");
+
+			return { actor, callbacks };
+		}
+
+		it("transitions to recording on START_RECORDING_READY", async () => {
+			const { actor } = await setupStartingState();
+
+			actor.send({ type: "START_RECORDING_READY" });
+			await waitForState(actor, "recording");
+
+			actor.stop();
+		});
+
+		it("transitions to idle on START_RECORDING_FAILED", async () => {
+			const { actor } = await setupStartingState();
+
+			actor.send({
+				type: "START_RECORDING_FAILED",
+				error: "Native microphone failed",
+			});
+			await waitForState(actor, "idle");
+
+			expect(actor.getSnapshot().context.error).toBe(
+				"Native microphone failed",
+			);
+
+			actor.stop();
+		});
+
+		it("transitions to idle on STOP_RECORDING", async () => {
+			const { actor } = await setupStartingState();
+
+			actor.send({ type: "STOP_RECORDING" });
+			await waitForState(actor, "idle");
+
+			actor.stop();
+		});
+	});
+
 	describe("State Transitions from recording", () => {
 		async function setupRecordingState() {
 			const { machine, callbacks } = createTestMachine({
@@ -452,6 +505,8 @@ describe("connectionMachine", () => {
 			callbacks.connectSendBack?.({ type: "CONNECTED" });
 			await waitForState(actor, "idle");
 			actor.send({ type: "START_RECORDING" });
+			await waitForState(actor, "startingRecording");
+			actor.send({ type: "START_RECORDING_READY" });
 			await waitForState(actor, "recording");
 
 			return { actor, callbacks };
@@ -498,6 +553,8 @@ describe("connectionMachine", () => {
 			callbacks.connectSendBack?.({ type: "CONNECTED" });
 			await waitForState(actor, "idle");
 			actor.send({ type: "START_RECORDING" });
+			await waitForState(actor, "startingRecording");
+			actor.send({ type: "START_RECORDING_READY" });
 			await waitForState(actor, "recording");
 			actor.send({ type: "STOP_RECORDING" });
 			await waitForState(actor, "processing");
@@ -794,7 +851,7 @@ describe("connectionMachine", () => {
 	});
 
 	describe("Full Flow Tests", () => {
-		it("happy path: disconnected → connecting → idle → recording → processing → idle", async () => {
+		it("happy path: disconnected → connecting → idle → startingRecording → recording → processing → idle", async () => {
 			const { machine, callbacks } = createTestMachine({
 				createClientBehavior: "success",
 			});
@@ -810,6 +867,9 @@ describe("connectionMachine", () => {
 			await waitForState(actor, "idle");
 
 			actor.send({ type: "START_RECORDING" });
+			await waitForState(actor, "startingRecording");
+
+			actor.send({ type: "START_RECORDING_READY" });
 			await waitForState(actor, "recording");
 
 			actor.send({ type: "STOP_RECORDING" });

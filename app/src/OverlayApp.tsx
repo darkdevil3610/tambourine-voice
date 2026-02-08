@@ -22,6 +22,7 @@ import { z } from "zod";
 import Logo from "./assets/logo.svg?react";
 import {
 	ConnectionProvider,
+	useConnectionActor,
 	useConnectionClient,
 	useConnectionSend,
 	useConnectionState,
@@ -198,6 +199,7 @@ type DisplayState =
 	| "connecting"
 	| "reconnecting"
 	| "idle"
+	| "startingRecording"
 	| "recording"
 	| "processing";
 
@@ -209,6 +211,7 @@ function getDisplayState(
 		.with("initializing", "connecting", "syncing", () => "connecting" as const)
 		.with("retrying", () => "reconnecting" as const)
 		.with("idle", () => "idle" as const)
+		.with("startingRecording", () => "startingRecording" as const)
 		.with("recording", () => "recording" as const)
 		.with("processing", () => "processing" as const)
 		.exhaustive();
@@ -233,6 +236,7 @@ function getPeerConnectionAudioSender(
 }
 
 function RecordingControl() {
+	const connectionActor = useConnectionActor();
 	const client = usePipecatClient();
 	const queryClient = useQueryClient();
 	const connectionState = useConnectionState();
@@ -276,7 +280,6 @@ function RecordingControl() {
 
 	// Error display state (persists until user records again)
 	const [showError, setShowError] = useState(false);
-	const recordingStartAttemptIdRef = useRef(0);
 
 	const { start: startResponseTimeout, clear: clearResponseTimeout } =
 		useTimeout(() => {
@@ -310,169 +313,212 @@ function RecordingControl() {
 	}, [rect.width, rect.height]);
 
 	// Handle start/stop recording from hotkeys
-	const onStartRecording = useCallback(async () => {
-		const recordingStartAttemptId = recordingStartAttemptIdRef.current + 1;
-		recordingStartAttemptIdRef.current = recordingStartAttemptId;
+	const onStartRecording = useCallback(() => {
+		send({ type: "START_RECORDING" });
+	}, [send]);
 
-		const isCurrentRecordingStartAttempt = () =>
-			recordingStartAttemptIdRef.current === recordingStartAttemptId;
+	useEffect(() => {
+		if (displayState !== "startingRecording") {
+			return;
+		}
 
-		// Clear error state when starting recording
-		setShowError(false);
+		let shouldIgnoreStartResults = false;
+		let didTransitionToRecording = false;
+		let hasTornDownCaptureForStartAttempt = false;
 
-		// Reset accumulators for new recording
-		// Important: rawTranscriptionRef is reset here (not on BotLlmStarted)
-		// because UserTranscript events arrive DURING recording, before LLM processes
-		streamedLlmResponseChunksRef.current = "";
-		rawTranscriptionRef.current = "";
-		activeAppContextSentForCurrentRecordingRef.current = null;
-
-		// Always show loading indicator during mic acquisition and recording start
-		// This ensures accurate UX feedback even when mic is pre-warmed
-		setIsMicAcquiring(true);
-
-		// Allow React to process the state update and show the loading indicator
-		// before we start the async mic operations
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		try {
-			if (!client) {
+		const tearDownCaptureForAbortedStartAttempt = () => {
+			if (hasTornDownCaptureForStartAttempt) {
 				return;
 			}
 
-			await waitUntilNativeAudioReady(
-				NATIVE_AUDIO_FIRST_FRAME_READY_TIMEOUT_MS,
-			);
-			if (!isCurrentRecordingStartAttempt()) {
-				return;
-			}
-
-			const selectedMicDeviceId = settings?.selected_mic_id ?? undefined;
-			if (!micPreparedRef.current) {
-				const startNativeCaptureResult = await startNativeCapture({
-					deviceId: selectedMicDeviceId,
-					waitForFirstAudioFrameMs: NATIVE_AUDIO_FIRST_FRAME_READY_TIMEOUT_MS,
-				});
-				if (!isCurrentRecordingStartAttempt()) {
-					stopNativeCapture();
-					lastMicIdRef.current = undefined;
-					return;
-				}
-				lastMicIdRef.current = selectedMicDeviceId ?? null;
-
-				if (!isCurrentRecordingStartAttempt()) {
-					stopNativeCapture();
-					lastMicIdRef.current = undefined;
-					return;
-				}
-
-				if (!startNativeCaptureResult.firstFrameReceived) {
-					console.warn(
-						"[Recording] Native mic did not produce audio frames before timeout",
-					);
-					setShowError(true);
-					stopNativeCapture();
-					lastMicIdRef.current = undefined;
-					return;
-				}
-			}
-
-			const nativeAudioTrackForRecording = getCurrentNativeAudioTrack();
-			if (!nativeAudioTrackForRecording) {
-				throw new Error("Native audio track is unavailable");
-			}
-
-			const transport = client.transport as SmallWebRTCTransport;
-			const peerConnection = (
-				transport as unknown as { pc?: RTCPeerConnection }
-			).pc;
-			if (!peerConnection) {
-				throw new Error("WebRTC peer connection is unavailable");
-			}
-
-			const audioSender = getPeerConnectionAudioSender(peerConnection);
-			if (audioSender) {
-				await audioSender.replaceTrack(nativeAudioTrackForRecording);
-			} else {
-				const nativeAudioTrackStream = new MediaStream([
-					nativeAudioTrackForRecording,
-				]);
-				peerConnection.addTrack(
-					nativeAudioTrackForRecording,
-					nativeAudioTrackStream,
-				);
-			}
-
-			if (!isCurrentRecordingStartAttempt()) {
-				stopNativeCapture();
-				lastMicIdRef.current = undefined;
-				return;
-			}
-
-			// Reset prepared state for next recording
-			micPreparedRef.current = false;
-
-			send({ type: "START_RECORDING" });
-
-			// Signal server to start turn management
-			// LLM formatting is now controlled globally via the config API
-			// Use safe send to detect communication failures and trigger reconnection
-			const activeAppContextSentForCurrentRecording =
-				settings?.send_active_app_context_enabled === true
-					? latestActiveAppContextRef.current
-					: null;
-			activeAppContextSentForCurrentRecordingRef.current =
-				activeAppContextSentForCurrentRecording;
-			const startRecordingData = activeAppContextSentForCurrentRecording
-				? { active_app_context: activeAppContextSentForCurrentRecording }
-				: {};
-			console.debug(
-				"[Active App Context] Sending start-recording payload:",
-				startRecordingData,
-			);
-			safeSendClientMessage(
-				client,
-				"start-recording",
-				startRecordingData,
-				(error) => send({ type: "COMMUNICATION_ERROR", error }),
-			);
-
-			// Emit after state transition tick so VoiceVisualizer has subscribed.
-			setTimeout(() => {
-				if (recordingStartAttemptIdRef.current !== recordingStartAttemptId) {
-					return;
-				}
-
-				client.emit(
-					RTVIEvent.TrackStarted,
-					nativeAudioTrackForRecording,
-					PIPECAT_LOCAL_PARTICIPANT,
-				);
-			}, 0);
-		} catch (error) {
-			console.warn("[Recording] Failed to start recording:", error);
 			stopNativeCapture();
 			lastMicIdRef.current = undefined;
 			micPreparedRef.current = false;
-			setShowError(true);
-		} finally {
-			if (isCurrentRecordingStartAttempt()) {
-				setIsMicAcquiring(false);
+			hasTornDownCaptureForStartAttempt = true;
+		};
+
+		const startRecordingFromMachineState = async () => {
+			// Clear error state when starting recording
+			setShowError(false);
+
+			// Reset accumulators for new recording
+			// Important: rawTranscriptionRef is reset here (not on BotLlmStarted)
+			// because UserTranscript events arrive DURING recording, before LLM processes
+			streamedLlmResponseChunksRef.current = "";
+			rawTranscriptionRef.current = "";
+			activeAppContextSentForCurrentRecordingRef.current = null;
+
+			// Always show loading indicator during mic acquisition and recording start
+			// This ensures accurate UX feedback even when mic is pre-warmed
+			setIsMicAcquiring(true);
+
+			// Allow React to process the state update and show the loading indicator
+			// before we start the async mic operations
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			try {
+				if (!client) {
+					send({
+						type: "START_RECORDING_FAILED",
+						error: "Pipecat client is unavailable while starting recording",
+					});
+					return;
+				}
+
+				await waitUntilNativeAudioReady(
+					NATIVE_AUDIO_FIRST_FRAME_READY_TIMEOUT_MS,
+				);
+				if (shouldIgnoreStartResults) {
+					return;
+				}
+
+				const selectedMicDeviceId = settings?.selected_mic_id ?? undefined;
+				if (!micPreparedRef.current) {
+					const startNativeCaptureResult = await startNativeCapture({
+						deviceId: selectedMicDeviceId,
+						waitForFirstAudioFrameMs: NATIVE_AUDIO_FIRST_FRAME_READY_TIMEOUT_MS,
+					});
+					if (shouldIgnoreStartResults) {
+						return;
+					}
+
+					lastMicIdRef.current = selectedMicDeviceId ?? null;
+
+					if (!startNativeCaptureResult.firstFrameReceived) {
+						console.warn(
+							"[Recording] Native mic did not produce audio frames before timeout",
+						);
+						setShowError(true);
+						tearDownCaptureForAbortedStartAttempt();
+						send({
+							type: "START_RECORDING_FAILED",
+							error: "Native microphone timed out before first audio frame",
+						});
+						return;
+					}
+				}
+
+				const nativeAudioTrackForRecording = getCurrentNativeAudioTrack();
+				if (!nativeAudioTrackForRecording) {
+					throw new Error("Native audio track is unavailable");
+				}
+
+				const transport = client.transport as SmallWebRTCTransport;
+				const peerConnection = (
+					transport as unknown as { pc?: RTCPeerConnection }
+				).pc;
+				if (!peerConnection) {
+					throw new Error("WebRTC peer connection is unavailable");
+				}
+
+				const audioSender = getPeerConnectionAudioSender(peerConnection);
+				if (audioSender) {
+					await audioSender.replaceTrack(nativeAudioTrackForRecording);
+				} else {
+					const nativeAudioTrackStream = new MediaStream([
+						nativeAudioTrackForRecording,
+					]);
+					peerConnection.addTrack(
+						nativeAudioTrackForRecording,
+						nativeAudioTrackStream,
+					);
+				}
+				if (shouldIgnoreStartResults) {
+					return;
+				}
+
+				// Reset prepared state for next recording
+				micPreparedRef.current = false;
+
+				// Signal server to start turn management
+				// LLM formatting is now controlled globally via the config API
+				// Use safe send to detect communication failures and trigger reconnection
+				const activeAppContextSentForCurrentRecording =
+					settings?.send_active_app_context_enabled === true
+						? latestActiveAppContextRef.current
+						: null;
+				activeAppContextSentForCurrentRecordingRef.current =
+					activeAppContextSentForCurrentRecording;
+				const startRecordingData = activeAppContextSentForCurrentRecording
+					? { active_app_context: activeAppContextSentForCurrentRecording }
+					: {};
+				console.debug(
+					"[Active App Context] Sending start-recording payload:",
+					startRecordingData,
+				);
+				safeSendClientMessage(
+					client,
+					"start-recording",
+					startRecordingData,
+					(error) => send({ type: "COMMUNICATION_ERROR", error }),
+				);
+
+				send({ type: "START_RECORDING_READY" });
+				didTransitionToRecording =
+					connectionActor.getSnapshot().value === "recording";
+
+				// Emit after state transition tick so VoiceVisualizer has subscribed.
+				setTimeout(() => {
+					const isStillRecordingState =
+						connectionActor.getSnapshot().value === "recording";
+					if (
+						shouldIgnoreStartResults ||
+						!didTransitionToRecording ||
+						!isStillRecordingState
+					) {
+						return;
+					}
+
+					client.emit(
+						RTVIEvent.TrackStarted,
+						nativeAudioTrackForRecording,
+						PIPECAT_LOCAL_PARTICIPANT,
+					);
+				}, 0);
+			} catch (error) {
+				if (shouldIgnoreStartResults) {
+					return;
+				}
+
+				console.warn("[Recording] Failed to start recording:", error);
+				tearDownCaptureForAbortedStartAttempt();
+				setShowError(true);
+				send({
+					type: "START_RECORDING_FAILED",
+					error: error instanceof Error ? error.message : String(error),
+				});
+			} finally {
+				if (!shouldIgnoreStartResults) {
+					setIsMicAcquiring(false);
+				}
 			}
-		}
+		};
+
+		startRecordingFromMachineState();
+
+		return () => {
+			const didAbortStartAttemptBeforeRecording = !didTransitionToRecording;
+			shouldIgnoreStartResults = didAbortStartAttemptBeforeRecording;
+			setIsMicAcquiring(false);
+
+			if (didAbortStartAttemptBeforeRecording) {
+				tearDownCaptureForAbortedStartAttempt();
+			}
+		};
 	}, [
 		client,
+		displayState,
 		settings?.selected_mic_id,
 		settings?.send_active_app_context_enabled,
+		connectionActor,
 		getCurrentNativeAudioTrack,
-		waitUntilNativeAudioReady,
+		send,
 		startNativeCapture,
 		stopNativeCapture,
-		send,
+		waitUntilNativeAudioReady,
 	]);
 
 	const onStopRecording = useCallback(() => {
-		recordingStartAttemptIdRef.current += 1;
 		setIsMicAcquiring(false);
 		micPreparedRef.current = false;
 
@@ -518,6 +564,9 @@ function RecordingControl() {
 				send({ type: "COMMUNICATION_ERROR", error }),
 			);
 		} else {
+			if (displayState === "startingRecording") {
+				send({ type: "STOP_RECORDING" });
+			}
 			activeAppContextSentForCurrentRecordingRef.current = null;
 		}
 	}, [
@@ -931,7 +980,7 @@ function RecordingControl() {
 	// Click handler (toggle mode)
 	const handleClick = useCallback(() => {
 		match(displayState)
-			.with("recording", () => onStopRecording())
+			.with("startingRecording", "recording", () => onStopRecording())
 			.with("idle", () => onStartRecording())
 			.with(
 				"disconnected",
@@ -978,6 +1027,7 @@ function RecordingControl() {
 			? ("loading" as const)
 			: match(displayState)
 					.with(
+						"startingRecording",
 						"processing",
 						"disconnected",
 						"connecting",

@@ -54,12 +54,21 @@ function ConnectionStatusIndicator() {
 	}, [setState]);
 
 	const isConnected =
-		state === "idle" || state === "recording" || state === "processing";
+		state === "idle" ||
+		state === "startingRecording" ||
+		state === "recording" ||
+		state === "processing";
 	const isConnecting = state === "connecting";
 
 	const statusText = match(state)
 		.with("connecting", () => "Connecting...")
-		.with("idle", "recording", "processing", () => "Connected")
+		.with(
+			"idle",
+			"startingRecording",
+			"recording",
+			"processing",
+			() => "Connected",
+		)
 		.otherwise(() => "Disconnected");
 
 	return (
@@ -236,7 +245,9 @@ function HomeView() {
 function SettingsView() {
 	const connectionState = useRecordingStore((s) => s.state);
 	const isRecordingActive =
-		connectionState === "recording" || connectionState === "processing";
+		connectionState === "startingRecording" ||
+		connectionState === "recording" ||
+		connectionState === "processing";
 
 	return (
 		<div

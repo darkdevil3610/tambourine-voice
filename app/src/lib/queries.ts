@@ -100,6 +100,7 @@ export function useRefreshServerQueriesOnConnect(
 			previousStateRef.current === "reconnecting";
 		const isCurrentlyConnected =
 			connectionState === "idle" ||
+			connectionState === "startingRecording" ||
 			connectionState === "recording" ||
 			connectionState === "processing";
 

@@ -81,6 +81,7 @@ export function ConnectionProvider({ children }: ConnectionProviderProps) {
 				)
 					.with(
 						"idle",
+						"startingRecording",
 						"syncing",
 						"recording",
 						"processing",

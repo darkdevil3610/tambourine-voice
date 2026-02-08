@@ -62,6 +62,7 @@ export type ConnectionState =
 	| "connecting"
 	| "reconnecting"
 	| "idle"
+	| "startingRecording"
 	| "recording"
 	| "processing";
 
