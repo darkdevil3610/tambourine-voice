@@ -44,8 +44,8 @@ const PIPECAT_LOCAL_PARTICIPANT = {
 	local: true,
 } as const;
 
-// Server message schemas as a discriminated union for single-parse handling
-const KnownServerMessageSchema = z.discriminatedUnion("type", [
+// Custom payload schemas carried via RTVIEvent.ServerMessage
+const KnownRTVICustomServerMessageSchema = z.discriminatedUnion("type", [
 	z.object({
 		type: z.literal("recording-complete-with-zero-words"),
 	}),
@@ -55,7 +55,7 @@ const KnownServerMessageSchema = z.discriminatedUnion("type", [
 		text: z.string(),
 	}),
 	// Provider switching uses RTVI (requires frame injection into pipeline)
-	// z.enum() validates known settings; unknown settings become UnknownServerMessage
+	// z.enum() validates known settings; unknown settings become UnknownRTVICustomServerMessage
 	z.object({
 		type: z.literal("config-updated"),
 		setting: z.string(),
@@ -69,36 +69,40 @@ const KnownServerMessageSchema = z.discriminatedUnion("type", [
 	}),
 ]);
 
-type KnownServerMessage = z.infer<typeof KnownServerMessageSchema>;
+type KnownRTVICustomServerMessage = z.infer<
+	typeof KnownRTVICustomServerMessageSchema
+>;
 
 /**
- * Unknown server message type (forward compatibility).
+ * Unknown RTVI custom server message type (forward compatibility).
  *
  * Preserves the raw message data for debugging, similar to
  * UnknownClientMessage pattern on the server side.
  */
-type UnknownServerMessage = {
+type UnknownRTVICustomServerMessage = {
 	type: "unknown";
 	originalType: string;
 	raw: unknown;
 };
 
-type ServerMessage = KnownServerMessage | UnknownServerMessage;
+type RTVICustomServerMessage =
+	| KnownRTVICustomServerMessage
+	| UnknownRTVICustomServerMessage;
 
 /**
- * Parse server message with forward compatibility.
+ * Parse RTVI custom server message with forward compatibility.
  *
- * Returns UnknownServerMessage for unknown types (never null).
+ * Returns UnknownRTVICustomServerMessage for unknown types (never null).
  * This allows exhaustive pattern matching while preserving raw data
  * for debugging purposes.
  */
-function parseServerMessage(raw: unknown): ServerMessage {
-	const result = KnownServerMessageSchema.safeParse(raw);
+function parseRTVICustomServerMessage(raw: unknown): RTVICustomServerMessage {
+	const result = KnownRTVICustomServerMessageSchema.safeParse(raw);
 	if (!result.success) {
 		const originalType = (raw as { type?: string })?.type ?? "";
 		// Log at warn level so it's visible by default in devtools
 		console.warn(
-			"[Pipecat] Failed to parse server message:",
+			"[Pipecat] Failed to parse RTVI custom server message:",
 			originalType,
 			"\nRaw:",
 			raw,
@@ -342,12 +346,10 @@ function RecordingControl() {
 			}
 		}, SERVER_RESPONSE_TIMEOUT_MS);
 
-	const {
-		start: startOverlayNoticeTimeout,
-		clear: clearOverlayNoticeTimeout,
-	} = useTimeout(() => {
-		setOverlayNoticeMessage(null);
-	}, EMPTY_RECORDING_NOTICE_TIMEOUT_MS);
+	const { start: startOverlayNoticeTimeout, clear: clearOverlayNoticeTimeout } =
+		useTimeout(() => {
+			setOverlayNoticeMessage(null);
+		}, EMPTY_RECORDING_NOTICE_TIMEOUT_MS);
 
 	// Clear response timeout when leaving processing state (reconnection, disconnection, etc.)
 	// This prevents the timeout from firing after we've already transitioned away
@@ -924,13 +926,13 @@ function RecordingControl() {
 		}, [clearResponseTimeout, typeTextMutation, addHistoryEntry, send]),
 	);
 
-	// Server message handler (for custom messages: config-updated, recording-complete, raw-transcription, etc.)
+	// RTVI ServerMessage handler for custom payloads
 	useRTVIClientEvent(
 		RTVIEvent.ServerMessage,
 		useCallback(
 			async (message: unknown) => {
 				// Use forward-compatible parser (never returns null)
-				const parsed = parseServerMessage(message);
+				const parsed = parseRTVICustomServerMessage(message);
 
 				match(parsed)
 					.with({ type: "recording-complete-with-zero-words" }, () => {
@@ -983,7 +985,7 @@ function RecordingControl() {
 						});
 					})
 					.with({ type: "unknown" }, () => {
-						// Already logged at warn level in parseServerMessage
+						// Already logged at warn level in parseRTVICustomServerMessage
 					})
 					.exhaustive();
 			},

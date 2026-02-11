@@ -7,7 +7,7 @@ This module provides type-safe message handling with:
 
 Message flow:
 - Client → Server: RecordingMessage | ConfigMessage (via RTVI data channel)
-- Server → Client: ServerMessage (via RTVIServerMessageFrame)
+- Server → Client: RTVICustomServerMessage (via RTVIServerMessageFrame)
 """
 
 from collections.abc import Mapping
@@ -313,7 +313,7 @@ class ConfigErrorMessage(BaseModel):
     error: str
 
 
-ServerMessage = Annotated[
+RTVICustomServerMessage = Annotated[
     EmptyTranscriptMessage | RawTranscriptionMessage | ConfigUpdatedMessage | ConfigErrorMessage,
     Field(discriminator="type"),
 ]
